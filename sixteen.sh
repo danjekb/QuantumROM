@@ -1,7 +1,7 @@
 #!/bin/bash
 
-if [ "$#" -lt 6 ]; then
-    echo "Usage: $0 <STOCK_DEVICE> <USE_UI_8_TETHERING_APEX> <TARGET_DEVICE> <TARGET_DEVICE_CSC> <TARGET_DEVICE_IMEI> <OUTPUT_FILESYSTEM>"
+if [ "$#" -lt 5 ]; then
+    echo "Usage: $0 <STOCK_DEVICE> <USE_UI_8_TETHERING_APEX> <TARGET_DEVICE> <PIXELDRAIN_ID> <OUTPUT_FILESYSTEM>"
     exit 1
 fi
 
@@ -9,9 +9,8 @@ fi
 export STOCK_DEVICE="$1"
 export USE_UI_8_TETHERING_APEX="$2"
 export TARGET_DEVICE="$3"
-export TARGET_DEVICE_CSC="$4"
-export TARGET_DEVICE_IMEI="$5"
-export OUTPUT_FILESYSTEM="$6"
+export PIXELDRAIN_ID="$4"
+export OUTPUT_FILESYSTEM="$5"
 
 VERSION="1"
 
@@ -29,7 +28,13 @@ export BUILD_PARTITIONS="product,system_ext,system"
 source "$(pwd)/scripts/debloat.sh"
 source "$(pwd)/scripts/QuantumRom.sh"
 
-#EXTRACT_FIRMWARE "$FIRM_DIR/$TARGET_DEVICE"
+# KROK 1: Pobieranie z Pixeldrain
+DOWNLOAD_PIXELDRAIN "$PIXELDRAIN_ID" "$FIRM_DIR/$TARGET_DEVICE"
+
+# KROK 2: Wypakowanie pobranego archiwum
+EXTRACT_FIRMWARE "$FIRM_DIR/$TARGET_DEVICE"
+
+# KROK 3: Przetwarzanie obrazów i partycji
 EXTRACT_SUPER_IMG "$FIRM_DIR/$TARGET_DEVICE"
 EXTRACT_FIRMWARE_IMG "$FIRM_DIR/$TARGET_DEVICE" "all"
 
@@ -37,13 +42,11 @@ DECODE_OMC "$FIRM_DIR/$TARGET_DEVICE" "$WORK_DIR"
 DEBLOAT "$FIRM_DIR/$TARGET_DEVICE"
 
 APPLY_STOCK_CONFIG "$FIRM_DIR/$TARGET_DEVICE"
-PATCH_SELINUX "$FIRM_DIR/$TARGET_DEVICE"
-DISABLE_SECURITY "$FIRM_DIR/$TARGET_DEVICE"
-ADD_SAMSUNG_FLAGSHIP_APPS "$FIRM_DIR/$TARGET_DEVICE"
-APPLY_CUSTOM_FEATURES "$FIRM_DIR/$TARGET_DEVICE"
+PATCH_CSC "$FIRM_DIR/$TARGET_DEVICE"
 
-INSTALL_FRAMEWORK "$APKTOOL" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework/framework-res.apk"
+UPDATE_SDHMS "$FIRM_DIR/$TARGET_DEVICE"
 
+echo "Decompiling framework files..."
 DECOMPILE "$APKTOOL" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework/ssrm.jar" "$WORK_DIR"
 DECOMPILE "$APKTOOL" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework/services.jar" "$WORK_DIR"
 DECOMPILE "$APKTOOL" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework" "$FIRM_DIR/$TARGET_DEVICE/system/system/framework/samsungkeystoreutils.jar" "$WORK_DIR"
@@ -61,8 +64,20 @@ mv -f "$WORK_DIR"/*.jar "$FIRM_DIR/$TARGET_DEVICE/system/system/framework/"
 PATCH_BT_LIB "$FIRM_DIR/$TARGET_DEVICE" "$WORK_DIR"
 
 B_ID="$(grep -m1 '^ro.system.build.id=' "$FIRM_DIR/$TARGET_DEVICE/system/system/build.prop" | cut -d= -f2 | tr -d '\r')"
-B_V="$(grep -m1 '^ro.system.build.version.incremental=' "$FIRM_DIR/$TARGET_DEVICE/system/system/build.prop" | cut -d= -f2 | tr -d '\r')"
-BUILD_PROP "$FIRM_DIR/$TARGET_DEVICE" "system" "ro.build.display.id" "${B_ID} ${B_V} V-${VERSION}: Built with Quantum Tools"
-BUILD_PROP "$FIRM_DIR/$TARGET_DEVICE" "product" "ro.build.display.id" "${B_ID} ${B_V} V-${VERSION}: Built with Quantum Tools"
+B_V="$(grep -m1 '^ro.system.build.version.release=' "$FIRM_DIR/$TARGET_DEVICE/system/system/build.prop" | cut -d= -f2 | tr -d '\r')"
+O_V="$(grep -m1 '^ro.build.version.oneui=' "$FIRM_DIR/$TARGET_DEVICE/system/system/build.prop" | cut -d= -f2 | tr -d '\r')"
 
-BUILD_IMG "$FIRM_DIR/$TARGET_DEVICE" "all" "$OUTPUT_FILESYSTEM" "$OUT_DIR"
+FLATTEN_SYSTEM "$FIRM_DIR/$TARGET_DEVICE"
+
+if [ "$STOCK_DEVICE" != "None" ]; then
+    FIX_VNDK "$FIRM_DIR/$TARGET_DEVICE"
+    PORT_X "$FIRM_DIR/$TARGET_DEVICE"
+fi
+
+BUILD_SUPER_IMG "$FIRM_DIR/$TARGET_DEVICE" "$OUT_DIR"
+
+if [ -n "$GITHUB_ENV" ]; then
+    echo "B_ID=$B_ID" >> "$GITHUB_ENV"
+    echo "B_V=$B_V" >> "$GITHUB_ENV"
+    echo "O_V=$O_V" >> "$GITHUB_ENV"
+fi
