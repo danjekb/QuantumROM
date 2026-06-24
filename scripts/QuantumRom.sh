@@ -151,51 +151,43 @@ DETECT_FILESYSTEM() {
 }
 
 
-DOWNLOAD_FIRMWARE() {
+DOWNLOAD_PIXELDRAIN() {
     echo " "
 
-    if [ "$#" -lt 4 ]; then
-        echo -e "Usage: ${FUNCNAME[0]} <MODEL> <CSC> <IMEI> <DOWNLOAD_DIRECTORY> [VERSION]"
+    if [ "$#" -ne 2 ]; then
+        echo -e "Usage: ${FUNCNAME[0]} <PIXELDRAIN_ID_OR_URL> <DOWNLOAD_DIRECTORY>"
         return 1
     fi
 
-    local MODEL="$1"
-    local CSC="$2"
-    local IMEI="$3"
-    local DOWN_DIR="${4}/$MODEL"
+    local INPUT_ID="$1"
+    local DOWN_DIR="$2"
+    local FILE_ID=""
+
+    if [[ "$INPUT_ID" == *"pixeldrain.com"* ]]; then
+        FILE_ID=$(echo "$INPUT_ID" | sed -E 's|.*/(u\|file)/([^/?#]+).*|\2|')
+    else
+        FILE_ID="$INPUT_ID"
+    fi
 
     rm -rf "$DOWN_DIR"
     mkdir -p "$DOWN_DIR"
 
     echo -e "======================================"
-    echo -e "  Samsung FW Downloader   "
+    echo -e "   Pixeldrain Direct Downloader       "
     echo -e "======================================"
-    echo -e "MODEL: $MODEL | CSC: $CSC"
+    echo -e "File ID: $FILE_ID"
+    echo -e "Downloading to: $DOWN_DIR"
 
-    VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
+    local DIRECT_URL="https://pixeldrain.com/api/file/${FILE_ID}"
 
-    if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
-        echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
-        echo -e "Error: $VERSION"
-        return 1
-    fi
+    aria2c -x 16 -s 16 -k 1M --content-disposition-default-utf8=true --check-certificate=false -d "$DOWN_DIR" "$DIRECT_URL"
 
-    if [ -n "$GITHUB_ENV" ]; then
-        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-    fi
-
-    # --- Step 2: Download Firmware ---
-    python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
     if [ $? -ne 0 ]; then
-        echo -e "⛔️ Download failed. Check IMEI/MODEL/CSC."
+        echo -e "⛔️ Pixeldrain download failed! Check File ID or your daily bandwidth limit."
         exit 1
     fi
 
-	find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
-
-    # --- Show Firmware Info ---
-    local file_size=$(du -m "${DOWN_DIR}"/${MODEL}_*_fac.zip 2>/dev/null | cut -f1)
-    echo -e "Firmware Size: ${file_size} MB"
+    echo -e "✅ Download complete."
 }
 
 
@@ -211,7 +203,7 @@ EXTRACT_FIRMWARE() {
 
     echo -e "Extracting downloaded firmware."
 
-	if [ ! -d "$FIRM_DIR" ]; then
+    if [ ! -d "$FIRM_DIR" ]; then
         echo -e "- Directory not found: $FIRM_DIR"
         exit
     fi
@@ -230,7 +222,7 @@ EXTRACT_FIRMWARE() {
     rm -f "$FIRM_DIR"/BL_*.tar.md5
     rm -f "$FIRM_DIR"/CP_*.tar.md5
     rm -f "$FIRM_DIR"/HOME_CSC_*.tar.md5
-	rm -f "$FIRM_DIR"/USERDATA_*.tar.md5
+    rm -f "$FIRM_DIR"/USERDATA_*.tar.md5
 
     # ---- XZ ----
     for file in "$FIRM_DIR"/*.xz; do
@@ -332,7 +324,7 @@ EXTRACT_SUPER_IMG() {
     if [ -f "$FIRM_DIR/super.img" ]; then
         echo -e "Extracting super.img"
         if [ "$(DETECT_FILESYSTEM "$FIRM_DIR/super.img")" = "sparse" ]; then
-		    echo -e "Converting to raw super.img"
+            echo -e "Converting to raw super.img"
             simg2img "$FIRM_DIR/super.img" "$FIRM_DIR/super_raw.img"
             rm -f "$FIRM_DIR/super.img"
             mv -f "$FIRM_DIR/super_raw.img" "$FIRM_DIR/super.img"
@@ -359,8 +351,8 @@ PREPARE_PARTITIONS() {
     local EXTRACTED_FIRM_DIR="$1"
 
     echo -e "Preparing partitions. $STOCK_DEVICE"
-	
-	if [ ! -d "$EXTRACTED_FIRM_DIR" ]; then
+    
+    if [ ! -d "$EXTRACTED_FIRM_DIR" ]; then
         echo -e "- Directory not found: $EXTRACTED_FIRM_DIR"
         return 1
     fi
@@ -373,7 +365,7 @@ PREPARE_PARTITIONS() {
         export STOCK_HAS_AB_SLOT="$(grep -m1 '^STOCK_HAS_AB_SLOT=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
     fi
 
-	# Delete empty b slot images
+    # Delete empty b slot images
     find "$EXTRACTED_FIRM_DIR" -type f -name '*_b.img' -size 0c -exec rm -rf {} +
 
     for img in "$EXTRACTED_FIRM_DIR"/*_a.img; do
@@ -493,13 +485,13 @@ EXTRACT_FIRMWARE_IMG() {
     }
 
     if [ "$MODE" = "all" ]; then
-	    PREPARE_PARTITIONS "$EXTRACTED_FIRM_DIR"
+        PREPARE_PARTITIONS "$EXTRACTED_FIRM_DIR"
         for imgfile in "$EXTRACTED_FIRM_DIR"/*.img; do
             [ -e "$imgfile" ] || continue
             extract_img "$imgfile"
         done
 
-	    rm -rf "$EXTRACTED_FIRM_DIR"/*.img
+        rm -rf "$EXTRACTED_FIRM_DIR"/*.img
 
     else
         local TARGET_IMG="${EXTRACTED_FIRM_DIR}/$MODE"
@@ -575,10 +567,10 @@ INSTALL_FRAMEWORK() {
         return 1
     fi
 
-	local APKTOOL="$1"
+    local APKTOOL="$1"
     local framework_apk="$2"
 
-	if [ ! -f "$framework_apk" ]; then
+    if [ ! -f "$framework_apk" ]; then
         echo -e "- File not found: $framework_apk"
         return 1
     fi
@@ -596,16 +588,8 @@ DECOMPILE() {
         return 1
     fi
 
-    # apktool version-3
-	# d = decompile
-	# --force = force delete target decompile directory before decompile
-	# --no-src = don't decompile dex file
-	# --no-res = don't decode resources
-	# --match-original = decompile everything as original
-	# --frame-path = framework path
-	# -o = decompile directory
-	local APKTOOL="$1"
-	local FRAMEWORK_DIR="$2"
+    local APKTOOL="$1"
+    local FRAMEWORK_DIR="$2"
     local FILE="$3"
     local DECOMPILE_DIR="$4"
     local BASENAME="$(basename "${FILE%.*}")"
@@ -613,12 +597,12 @@ DECOMPILE() {
 
     echo -e "Decompiling: $FILE"
 
-	if [ ! -f "$FILE" ]; then
+    if [ ! -f "$FILE" ]; then
         echo -e "- File not found: $FILE"
         return 1
     fi
 
-	rm -rf "$OUT"
+    rm -rf "$OUT"
     java -jar "$APKTOOL" d --force --frame-path "$FRAMEWORK_DIR" --match-original "$FILE" -o "$OUT"
 }
 
@@ -626,19 +610,14 @@ DECOMPILE() {
 RECOMPILE() {
     echo " "
 
-	if [ "$#" -ne 4 ]; then
+    if [ "$#" -ne 4 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <APKTOOL_JAR_DIR> <FRAMEWORK_DIR> <DECOMPILED_DIR> <RECOMPILE_DIR>"
         return 1
     fi
 
-    # apktool version-3
-	# b = recompile
-	# --copy-original = use original manifest
-	# --frame-path = framework path
-	# -o = output /recompile file directory with filename
-	local APKTOOL="$1"
-	local FRAMEWORK_DIR="$2"
-	local DECOMPILED_DIR="$3"
+    local APKTOOL="$1"
+    local FRAMEWORK_DIR="$2"
+    local DECOMPILED_DIR="$3"
     local RECOMPILE_DIR="$4"
 
     local org_file_name=$(awk '/^apkFileName:/ {print $2}' "$DECOMPILED_DIR/apktool.yml")
@@ -648,21 +627,13 @@ RECOMPILE() {
 
     echo -e "Recompiling: $DECOMPILED_DIR"
 
-	if [ ! -d "$DECOMPILED_DIR" ]; then
+    if [ ! -d "$DECOMPILED_DIR" ]; then
         echo -e "- Directory not found: $DECOMPILED_DIR"
         return 1
     fi
 
     java -jar "$APKTOOL" b "$DECOMPILED_DIR" --copy-original --frame-path "$FRAMEWORK_DIR" -o "$built_file"
     rm -rf "$DECOMPILED_DIR"
-
-	# Zipalign
-	# echo " "
-	# if [[ "$ext" == "apk" ]]; then
-	    # echo -e "Zipaligning: $built_file to $final_file"
-        # zipalign -v 4 "$built_file" "$final_file" >/dev/null 2>&1
-		# rm -rf "$built_file"
-    # fi
 }
 
 
@@ -679,7 +650,6 @@ REPLACE_SMALI_METHOD() {
         return 0
     fi
 
-    # Extract method key (safe match)
     local METHOD_KEY=$(echo "$METHOD_NAME" | sed -E 's/.* ([^ ]+\().*/\1/')
 
     sed -i "
@@ -698,7 +668,7 @@ REPLACE_SMALI_METHOD() {
 HEX_PATCH() {
     echo " "
 
-	if [ "$#" -ne 3 ]; then
+    if [ "$#" -ne 3 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <FILE> <TARGET_VALUE> <REPLACE_VALUE>"
         return 1
     fi
@@ -734,23 +704,16 @@ HEX_PATCH() {
 
 
 PATCH_FLAG_SECURE() {
-	echo " "
+    echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
-	echo -e "Patching flag secure."
-    #
-	# For android 13
-	# local FILE="${1}/smali_classes3/com/android/server/wm/WindowState.smali"
-	# local METHOD_NAME_1=".method public isSecureLocked()Z"
-	# Only one method.
+    echo -e "Patching flag secure."
 
-    # https://github.com/ShaDisNX255/NcX_Stock/commit/c2cc85818df4fe040b4f89ca8f9b78e939b211b4
-    # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86811691
-	local FILE_1="${1}/smali_classes2/com/android/server/wm/WindowState.smali"
+    local FILE_1="${1}/smali_classes2/com/android/server/wm/WindowState.smali"
     local METHOD_NAME_1=".method public final isSecureLocked()Z"
     local REPLACE_BODY_1='
     .locals 1
@@ -761,7 +724,7 @@ PATCH_FLAG_SECURE() {
     '
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
   
-	local FILE_2="${1}/smali_classes2/com/android/server/wm/WindowManagerService.smali"
+    local FILE_2="${1}/smali_classes2/com/android/server/wm/WindowManagerService.smali"
     local METHOD_NAME_2=".method public final notifyScreenshotListeners(I)Ljava/util/List;"
     local REPLACE_BODY_2='
     .locals 3
@@ -778,9 +741,7 @@ PATCH_FLAG_SECURE() {
 
     const-string/jumbo v1, "notifyScreenshotListeners()"
 
-    const/4 v2, 0x1
-
-    invoke-virtual {p0, v0, v1, v2}, Lcom/android/server/wm/WindowManagerService;->checkCallingPermission$1(Ljava/lang/String;Ljava/lang/String;Z)Z
+    const/4 v2, 0{BUILD_SUPER_IMG}1 {BUILD_SUPER_IMG}	invoke-virtual {p0, v0, v1, v2}, Lcom/android/server/wm/WindowManagerService;->checkCallingPermission$1(Ljava/lang/String;Ljava/lang/String;Z)Z
 
     move-result v0
 
@@ -808,17 +769,16 @@ PATCH_FLAG_SECURE() {
 PATCH_SECURE_FOLDER() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Patching secure folder."
 
-	#https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86770885
-	local FILE_1="${1}/smali/com/android/server/knox/dar/DarManagerService.smali"
-	local METHOD_NAME_1=".method public final checkDeviceIntegrity([Ljava/security/cert/Certificate;)Z"
-	local METHOD_NAME_2=".method public final isDeviceRootKeyInstalled()Z"
+    local FILE_1="${1}/smali/com/android/server/knox/dar/DarManagerService.smali"
+    local METHOD_NAME_1=".method public final checkDeviceIntegrity([Ljava/security/cert/Certificate;)Z"
+    local METHOD_NAME_2=".method public final isDeviceRootKeyInstalled()Z"
     local METHOD_NAME_3=".method public final isKnoxKeyInstallable()Z"
     
     local REPLACE_BODY_1='
@@ -831,7 +791,7 @@ PATCH_SECURE_FOLDER() {
 
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_2" "$REPLACE_BODY_1"
-	REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1"
+    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1"
 
     local FILE_2="${1}/smali/com/android/server/StorageManagerService.smali"
     local METHOD_NAME_4=".method public static isRootedDevice()Z"
@@ -849,17 +809,15 @@ PATCH_SECURE_FOLDER() {
 PATCH_PRIVATE_SHARE() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Patching private share."
-	# https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86805769
-	
+    
     local FILE="${1}/smali/com/samsung/android/security/keystore/AttestParameterSpec.smali"
-    # patch .method public isVerifiableIntegrity()Z
-    local METHOD_NAME=".method public isVerifiableIntegrity()Z"
+    local METHOD_NAME=".method public i{BUILD_SUPER_IMG}sVerifiableIntegrity()Z"
     local REPLACE_BODY='
     .locals 1
  
@@ -867,25 +825,21 @@ PATCH_PRIVATE_SHARE() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
 }
 
 
 DISABLE_SIGNATURE_VERIFICATION() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Disabling signature verification."
-	# https://github.com/ShaDisNX255/NcX_Stock/commit/e9fca1cedf2405c9f84dc2ee4aafa018e59de464
-    # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-87773529
-    # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-87773543
 
     local FILE="${1}/smali_classes4/android/util/apk/ApkSignatureVerifier.smali"
-    # patch .method public static blacklist getMinimumSignatureSchemeVersionForTargetSdk(I)I
     local METHOD_NAME=".method public static blacklist getMinimumSignatureSchemeVersionForTargetSdk(I)I"
     local REPLACE_BODY='
     .locals 1
@@ -894,26 +848,25 @@ DISABLE_SIGNATURE_VERIFICATION() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
 }
 
 
 PATCH_KNOX_GUARD() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Patching knox guard."
     local FILE="${1}/smali_classes2/com/samsung/android/knoxguard/service/KnoxGuardSeService.smali"
-    # patch .method public constructor <init>(Landroid/content/Context;)V
     local METHOD_NAME_1=".method public constructor <init>(Landroid/content/Context;)V"
     local REPLACE_BODY_1='
     .locals 0
  
-	invoke-direct {p0}, Lcom/samsung/android/knoxguard/IKnoxGuardManager$Stub;-><init>()V
+    invoke-direct {p0}, Lcom/samsung/android/knoxguard/IKnoxGuardManager$Stub;-><init>()V
  
     const/4 p1, 0x0
  
@@ -923,13 +876,12 @@ PATCH_KNOX_GUARD() {
  
     const-string p1, "KnoxGuard is disabled"
  
-
     invoke-direct {p0, p1}, Ljava/lang/UnsupportedOperationException;-><init>(Ljava/lang/String;)V
 
     throw p0
     '
     REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME_1" "$REPLACE_BODY_1"
-	rm -rf "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app/KnoxGuard"
+    rm -rf "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app/KnoxGuard"
 }
 
 
@@ -941,10 +893,10 @@ UPDATE_SDHMS() {
 
     local EXTRACTED_FIRM_DIR="$1"
 
-	if [ "$USE_ALT_SDHMS_APP" = "TRUE" ]; then
+    if [ "$USE_ALT_SDHMS_APP" = "TRUE" ]; then
         echo "- Adding alternative SDHMS app."
-		rm -rf "${EXTRACTED_FIRM_DIR}/system/priv-app/SamsungDeviceHealthManagerService"
-		cp -a "$(pwd)/QuantumROM/Mods/Apps/SDHMS/." "${EXTRACTED_FIRM_DIR}/system"
+        rm -rf "${EXTRACTED_FIRM_DIR}/system/priv-app/SamsungDeviceHealthManagerService"
+        cp -a "$(pwd)/QuantumROM/Mods/Apps/SDHMS/." "${EXTRACTED_FIRM_DIR}/system"
     fi
 }
 
@@ -991,17 +943,17 @@ PATCH_SSRM() {
 PATCH_BT_LIB() {
     echo " "
 
-	if [ "$#" -ne 2 ]; then
+    if [ "$#" -ne 2 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIRECTORY> <WORK_DIR>"
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	local WORK_DIR="$2"
-	local BT_LIB_FILE="$WORK_DIR/libbluetooth_jni.so"
+    local EXTRACTED_FIRM_DIR="$1"
+    local WORK_DIR="$2"
+    local BT_LIB_FILE="$WORK_DIR/libbluetooth_jni.so"
 
     echo -e "Patching Bluetooth library."
-    # Get libbluetooth_jni.so
+    
     if ! ls "$EXTRACTED_FIRM_DIR"/system/system/apex/com.android.bt*.apex >/dev/null 2>&1; then
         echo -e "- No bluetooth apex file found."
         return 1
@@ -1011,10 +963,10 @@ PATCH_BT_LIB() {
         "apex_payload.img" \
         -o"$WORK_DIR" -y >/dev/null
 
-	debugfs -R "dump /lib64/libbluetooth_jni.so $WORK_DIR/libbluetooth_jni.so" \
+    debugfs -R "dump /lib64/libbluetooth_jni.so $WORK_DIR/libbluetooth_jni.so" \
         "$WORK_DIR/apex_payload.img" >/dev/null
 
-	rm -rf "$WORK_DIR/apex_payload.img"
+    rm -rf "$WORK_DIR/apex_payload.img"
 
     declare -A hex=(
         [136]=00122a0140395f01086b00020054 [1136]=00122a0140395f01086bde030014
@@ -1057,7 +1009,6 @@ PATCH_BT_LIB() {
         local to="${hex[$((idx + 1000))]}"
         [ -z "$to" ] && continue
 
-        # convert wildcard .... → regex
         local from_regex="$(echo "$from" | sed -E 's/\.\./[0-9a-f]{2}/g')"
 
         if perl -e '
@@ -1125,7 +1076,6 @@ ADD_SYSTEM_EXT_IN_SYSTEM_ROOT() {
 
     echo -e "- Cleaning and merging system_ext file contexts and configs"
 
-    # File paths
     SYSTEM_EXT_CONFIG_FILE="${EXTRACTED_FIRM_DIR}/config/system_ext_fs_config"
     SYSTEM_EXT_CONTEXTS_FILE="${EXTRACTED_FIRM_DIR}/config/system_ext_file_contexts"
     SYSTEM_CONFIG_FILE="${EXTRACTED_FIRM_DIR}/config/system_fs_config"
@@ -1134,28 +1084,23 @@ ADD_SYSTEM_EXT_IN_SYSTEM_ROOT() {
     SYSTEM_EXT_TEMP_CONFIG="${SYSTEM_EXT_CONFIG_FILE}.tmp"
     SYSTEM_EXT_TEMP_CONTEXTS="${SYSTEM_EXT_CONTEXTS_FILE}.tmp"
 
-    # Clean system_ext contexts
     grep -v '^/ u:object_r:system_file:s0$' "$SYSTEM_EXT_CONTEXTS_FILE" \
     | grep -v '^/system_ext u:object_r:system_file:s0$' \
     | grep -v '^/system_ext(.*)? u:object_r:system_file:s0$' \
     | grep -v '^/system_ext/ u:object_r:system_file:s0$' \
     > "$SYSTEM_EXT_TEMP_CONTEXTS" && mv "$SYSTEM_EXT_TEMP_CONTEXTS" "$SYSTEM_EXT_CONTEXTS_FILE"
 
-    # Clean system_ext config
     grep -v '^/ 0 0 0755$' "$SYSTEM_EXT_CONFIG_FILE" \
     | grep -v '^system_ext/ 0 0 0755$' \
     > "$SYSTEM_EXT_TEMP_CONFIG" && mv "$SYSTEM_EXT_TEMP_CONFIG" "$SYSTEM_EXT_CONFIG_FILE"
 
-    # Fix paths inside system_ext config & contexts
     sed -i 's|^/system_ext/|system/system_ext/|g' "$SYSTEM_EXT_CONTEXTS_FILE"
     sed -i 's|^/system_ext$|system/system_ext|g' "$SYSTEM_EXT_CONTEXTS_FILE"
     sed -i 's|^system_ext/|system/system_ext/|g' "$SYSTEM_EXT_CONFIG_FILE"
 
-    # Merge contexts and config into system
     cat "$SYSTEM_EXT_CONTEXTS_FILE" >> "$SYSTEM_CONTEXTS_FILE"
     cat "$SYSTEM_EXT_CONFIG_FILE" >> "$SYSTEM_CONFIG_FILE"
 
-    # Remove system_ext files from config folder
     rm -rf "$SYSTEM_EXT_CONTEXTS_FILE" "$SYSTEM_EXT_CONFIG_FILE"
 }
 
@@ -1167,18 +1112,33 @@ FLATTEN_SYSTEM() {
     fi
 
     local EXTRACTED_FIRM_DIR="$1"
+    local SYSTEM_ROOT="${EXTRACTED_FIRM_DIR}/system"
 
-    if [ -d "${EXTRACTED_FIRM_DIR}/system/system" ]; then
-        echo -e "- Flattening system/system directory structure"
+    if [ ! -d "$SYSTEM_ROOT" ]; then
+        echo "- System directory not found."
+        return 1
+    fi
+
+    echo "- Szukam najgłębszego 'system'..."
+    
+    local CURRENT="$SYSTEM_ROOT"
+    while [ -d "$CURRENT/system" ] && [ ! -L "$CURRENT/system" ]; do
+        CURRENT="$CURRENT/system"
+    done
+
+    if [ "$CURRENT" != "$SYSTEM_ROOT" ]; then
+        echo "- Znaleziono zagnieżdżony system w: $CURRENT"
+        echo "- Spłaszczanie..."
         
-        # Przenoszenie zawartości i czyszczenie configów
         ADD_SYSTEM_EXT_IN_SYSTEM_ROOT "$EXTRACTED_FIRM_DIR"
         FIX_SYSTEM_PATHS "$EXTRACTED_FIRM_DIR"
 
-        mv "${EXTRACTED_FIRM_DIR}/system/system/"* "${EXTRACTED_FIRM_DIR}/system/"
-        rm -rf "${EXTRACTED_FIRM_DIR}/system/system"
+        cp -aR "$CURRENT"/. "$SYSTEM_ROOT/"
+        rm -rf "$CURRENT"
+        
+        echo "- System partition flattened."
     else
-        echo -e "- system/system directory not found, skipping flattening"
+        echo "- System partition już spłaszczony."
     fi
 }
 
@@ -1190,11 +1150,10 @@ FIX_SYSTEM_PATHS() {
     fi
 
     local EXTRACTED_FIRM_DIR="$1"
+    local SYSTEM_CONFIG_FILE="${EXTRACTED_FIRM_DIR}/config/system_fs_config"
+    local SYSTEM_CONTEXTS_FILE="${EXTRACTED_FIRM_DIR}/config/system_file_contexts"
 
-    echo -e "- Adjusting file_contexts and fs_config paths for flattened system"
-    
-    SYSTEM_CONFIG_FILE="${EXTRACTED_FIRM_DIR}/config/system_fs_config"
-    SYSTEM_CONTEXTS_FILE="${EXTRACTED_FIRM_DIR}/config/system_file_contexts"
+    echo -e "- Adjusting file_contexts and fs_config paths for flattened system..."
 
     if [ -f "$SYSTEM_CONTEXTS_FILE" ]; then
         sed -i 's|^/system/|/|g' "$SYSTEM_CONTEXTS_FILE"
