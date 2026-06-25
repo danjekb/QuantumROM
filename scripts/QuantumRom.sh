@@ -1320,9 +1320,11 @@ FIX_SYSTEM_NESTING() {
             > "$SYSTEM_FILE_CONTEXTS.tmp" && mv "$SYSTEM_FILE_CONTEXTS.tmp" "$SYSTEM_FILE_CONTEXTS"
 
         # Rewrite /system/system/<path> → /system/<path>
-        sed -i 's|^/system/system/|/system/|g' "$SYSTEM_FILE_CONTEXTS"
+sed -i 's|^/system/system/|/system/|g' "$SYSTEM_FILE_CONTEXTS"
+# Zachowaj tylko unikalne pierwsze kolumny (ścieżki), ignorując sprzeczne etykiety
+awk '!seen[$1]++' "$SYSTEM_FILE_CONTEXTS" > "$SYSTEM_FILE_CONTEXTS.tmp"
+mv "$SYSTEM_FILE_CONTEXTS.tmp" "$SYSTEM_FILE_CONTEXTS"
 
-        sort -u "$SYSTEM_FILE_CONTEXTS" -o "$SYSTEM_FILE_CONTEXTS"
         echo -e "- system_file_contexts fixed"
     fi
 
