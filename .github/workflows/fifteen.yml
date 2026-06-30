@@ -56,12 +56,27 @@ jobs:
           sudo apt install -y p7zip-full lz4 liblz4-1 liblz4-dev libzstd1 libzstd-dev build-essential android-sdk-libsparse-utils f2fs-tools fuse2fs fuse e2fsprogs python3 python3-pip zipalign unzip openjdk-21-jdk jq perl xxd kmod erofs-utils linux-modules-extra-$(uname -r)
           sudo modprobe f2fs
           sudo pip3 install git+https://github.com/SN-Abdullah-Al-Noman/samloader.git --break-system-packages
+          # Dodano gdown dla stabilniejszego pobierania z Google Drive
+          sudo pip3 install gdown --break-system-packages
           mkdir -p FW WORK OUT
 
-      - name: Download firmware ▶️ ${{ github.event.inputs.TARGET_DEVICE }} - ${{ github.event.inputs.TARGET_DEVICE_CSC }}
+      - name: Download firmware from Google Drive
         run: |
-          source scripts/QuantumRom.sh
-          DOWNLOAD_FIRMWARE "${{ github.event.inputs.TARGET_DEVICE }}" "${{ github.event.inputs.TARGET_DEVICE_CSC }}" "${{ github.event.inputs.TARGET_DEVICE_IMEI }}" "FW" "${{ github.event.inputs.TARGET_FW_VERSION }}"
+          mkdir -p FW/${{ github.event.inputs.TARGET_DEVICE }}
+          echo "Pobieranie firmware z Google Drive..."
+          
+          # Używamy gdown zamiast wget. --fuzzy pomaga, jeśli link jest niekompletny.
+          # Zmieniłem nazwę pliku na dynamiczną, aby pasowała do TARGET_DEVICE.
+          gdown "https://drive.google.com/uc?id=1YeuIHbmv_PVaN-wHep_fCYpU334O31Cw" \
+            -O "FW/${{ github.event.inputs.TARGET_DEVICE }}/firmware.zip" \
+            --fuzzy
+            
+          # Sprawdzenie czy plik istnieje i czy nie jest pusty
+          if [ ! -s "FW/${{ github.event.inputs.TARGET_DEVICE }}/firmware.zip" ]; then
+            echo "⛔️ Błąd pobierania z Google Drive (plik pusty lub nie znaleziony)"
+            exit 1
+          fi
+          echo "✅ Pobrano firmware."
 
       - name: Extract firmware
         run: |
