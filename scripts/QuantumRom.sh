@@ -151,6 +151,7 @@ DETECT_FILESYSTEM() {
 }
 
 
+# ======================= POPRAWIONA FUNKCJA =======================
 DOWNLOAD_FIRMWARE() {
     echo " "
 
@@ -163,6 +164,7 @@ DOWNLOAD_FIRMWARE() {
     local CSC="$2"
     local IMEI="$3"
     local DOWN_DIR="${4}/$MODEL"
+    local REQUESTED_VERSION="$5"   # opcjonalny argument z wersją
 
     rm -rf "$DOWN_DIR"
     mkdir -p "$DOWN_DIR"
@@ -172,12 +174,19 @@ DOWNLOAD_FIRMWARE() {
     echo -e "======================================"
     echo -e "MODEL: $MODEL | CSC: $CSC"
 
-    VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
-
-    if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
-        echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
-        echo -e "Error: $VERSION"
-        return 1
+    # Jeśli podano wersję (niepustą i nie "None"), użyj jej
+    if [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "None" ]; then
+        VERSION="$REQUESTED_VERSION"
+        echo -e "Using specified version: $VERSION"
+    else
+        # W przeciwnym razie pobierz najnowszą
+        VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
+        if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
+            echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
+            echo -e "Error: $VERSION"
+            return 1
+        fi
+        echo -e "Latest version: $VERSION"
     fi
 
     if [ -n "$GITHUB_ENV" ]; then
@@ -185,18 +194,26 @@ DOWNLOAD_FIRMWARE() {
     fi
 
     # --- Step 2: Download Firmware ---
-    python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
+    if [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "None" ]; then
+        # Pobierz konkretną wersję
+        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -v "$VERSION" -O "$DOWN_DIR"
+    else
+        # Pobierz najnowszą
+        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
+    fi
+
     if [ $? -ne 0 ]; then
         echo -e "⛔️ Download failed. Check IMEI/MODEL/CSC."
         exit 1
     fi
 
-	find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
+    find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
 
     # --- Show Firmware Info ---
     local file_size=$(du -m "${DOWN_DIR}"/${MODEL}_*_fac.zip 2>/dev/null | cut -f1)
     echo -e "Firmware Size: ${file_size} MB"
 }
+# ======================= KONIEC POPRAWKI =======================
 
 
 EXTRACT_FIRMWARE() {
@@ -211,7 +228,7 @@ EXTRACT_FIRMWARE() {
 
     echo -e "Extracting downloaded firmware."
 
-	if [ ! -d "$FIRM_DIR" ]; then
+    if [ ! -d "$FIRM_DIR" ]; then
         echo -e "- Directory not found: $FIRM_DIR"
         exit
     fi
@@ -230,7 +247,7 @@ EXTRACT_FIRMWARE() {
     rm -f "$FIRM_DIR"/BL_*.tar.md5
     rm -f "$FIRM_DIR"/CP_*.tar.md5
     rm -f "$FIRM_DIR"/HOME_CSC_*.tar.md5
-	rm -f "$FIRM_DIR"/USERDATA_*.tar.md5
+    rm -f "$FIRM_DIR"/USERDATA_*.tar.md5
 
     # ---- XZ ----
     for file in "$FIRM_DIR"/*.xz; do
@@ -332,7 +349,7 @@ EXTRACT_SUPER_IMG() {
     if [ -f "$FIRM_DIR/super.img" ]; then
         echo -e "Extracting super.img"
         if [ "$(DETECT_FILESYSTEM "$FIRM_DIR/super.img")" = "sparse" ]; then
-		    echo -e "Converting to raw super.img"
+            echo -e "Converting to raw super.img"
             simg2img "$FIRM_DIR/super.img" "$FIRM_DIR/super_raw.img"
             rm -f "$FIRM_DIR/super.img"
             mv -f "$FIRM_DIR/super_raw.img" "$FIRM_DIR/super.img"
@@ -359,8 +376,8 @@ PREPARE_PARTITIONS() {
     local EXTRACTED_FIRM_DIR="$1"
 
     echo -e "Preparing partitions. $STOCK_DEVICE"
-	
-	if [ ! -d "$EXTRACTED_FIRM_DIR" ]; then
+    
+    if [ ! -d "$EXTRACTED_FIRM_DIR" ]; then
         echo -e "- Directory not found: $EXTRACTED_FIRM_DIR"
         return 1
     fi
@@ -373,7 +390,7 @@ PREPARE_PARTITIONS() {
         export STOCK_HAS_AB_SLOT="$(grep -m1 '^STOCK_HAS_AB_SLOT=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
     fi
 
-	# Delete empty b slot images
+    # Delete empty b slot images
     find "$EXTRACTED_FIRM_DIR" -type f -name '*_b.img' -size 0c -exec rm -rf {} +
 
     for img in "$EXTRACTED_FIRM_DIR"/*_a.img; do
@@ -493,13 +510,13 @@ EXTRACT_FIRMWARE_IMG() {
     }
 
     if [ "$MODE" = "all" ]; then
-	    PREPARE_PARTITIONS "$EXTRACTED_FIRM_DIR"
+        PREPARE_PARTITIONS "$EXTRACTED_FIRM_DIR"
         for imgfile in "$EXTRACTED_FIRM_DIR"/*.img; do
             [ -e "$imgfile" ] || continue
             extract_img "$imgfile"
         done
 
-	    if [ "${GITHUB_ACTIONS}" = "true" ]; then
+        if [ "${GITHUB_ACTIONS}" = "true" ]; then
             rm -f "$EXTRACTED_FIRM_DIR"/*.img
         fi
 
@@ -577,10 +594,10 @@ INSTALL_FRAMEWORK() {
         return 1
     fi
 
-	local APKTOOL="$1"
+    local APKTOOL="$1"
     local framework_apk="$2"
 
-	if [ ! -f "$framework_apk" ]; then
+    if [ ! -f "$framework_apk" ]; then
         echo -e "- File not found: $framework_apk"
         return 1
     fi
@@ -599,15 +616,15 @@ DECOMPILE() {
     fi
 
     # apktool version-3
-	# d = decompile
-	# --force = force delete target decompile directory before decompile
-	# --no-src = don't decompile dex file
-	# --no-res = don't decode resources
-	# --match-original = decompile everything as original
-	# --frame-path = framework path
-	# -o = decompile directory
-	local APKTOOL="$1"
-	local FRAMEWORK_DIR="$2"
+    # d = decompile
+    # --force = force delete target decompile directory before decompile
+    # --no-src = don't decompile dex file
+    # --no-res = don't decode resources
+    # --match-original = decompile everything as original
+    # --frame-path = framework path
+    # -o = decompile directory
+    local APKTOOL="$1"
+    local FRAMEWORK_DIR="$2"
     local FILE="$3"
     local DECOMPILE_DIR="$4"
     local BASENAME="$(basename "${FILE%.*}")"
@@ -615,12 +632,12 @@ DECOMPILE() {
 
     echo -e "Decompiling: $FILE"
 
-	if [ ! -f "$FILE" ]; then
+    if [ ! -f "$FILE" ]; then
         echo -e "- File not found: $FILE"
         return 1
     fi
 
-	rm -rf "$OUT"
+    rm -rf "$OUT"
     java -jar "$APKTOOL" d --force --frame-path "$FRAMEWORK_DIR" --match-original "$FILE" -o "$OUT"
 }
 
@@ -628,19 +645,19 @@ DECOMPILE() {
 RECOMPILE() {
     echo " "
 
-	if [ "$#" -ne 4 ]; then
+    if [ "$#" -ne 4 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <APKTOOL_JAR_DIR> <FRAMEWORK_DIR> <DECOMPILED_DIR> <RECOMPILE_DIR>"
         return 1
     fi
 
     # apktool version-3
-	# b = recompile
-	# --copy-original = use original manifest
-	# --frame-path = framework path
-	# -o = output /recompile file directory with filename
-	local APKTOOL="$1"
-	local FRAMEWORK_DIR="$2"
-	local DECOMPILED_DIR="$3"
+    # b = recompile
+    # --copy-original = use original manifest
+    # --frame-path = framework path
+    # -o = output /recompile file directory with filename
+    local APKTOOL="$1"
+    local FRAMEWORK_DIR="$2"
+    local DECOMPILED_DIR="$3"
     local RECOMPILE_DIR="$4"
 
     local org_file_name=$(awk '/^apkFileName:/ {print $2}' "$DECOMPILED_DIR/apktool.yml")
@@ -650,7 +667,7 @@ RECOMPILE() {
 
     echo -e "Recompiling: $DECOMPILED_DIR"
 
-	if [ ! -d "$DECOMPILED_DIR" ]; then
+    if [ ! -d "$DECOMPILED_DIR" ]; then
         echo -e "- Directory not found: $DECOMPILED_DIR"
         return 1
     fi
@@ -658,12 +675,12 @@ RECOMPILE() {
     java -jar "$APKTOOL" b "$DECOMPILED_DIR" --copy-original --frame-path "$FRAMEWORK_DIR" -o "$built_file"
     rm -rf "$DECOMPILED_DIR"
 
-	# Zipalign
-	# echo " "
-	# if [[ "$ext" == "apk" ]]; then
-	    # echo -e "Zipaligning: $built_file to $final_file"
+    # Zipalign
+    # echo " "
+    # if [[ "$ext" == "apk" ]]; then
+        # echo -e "Zipaligning: $built_file to $final_file"
         # zipalign -v 4 "$built_file" "$final_file" >/dev/null 2>&1
-		# rm -rf "$built_file"
+        # rm -rf "$built_file"
     # fi
 }
 
@@ -700,7 +717,7 @@ REPLACE_SMALI_METHOD() {
 HEX_PATCH() {
     echo " "
 
-	if [ "$#" -ne 3 ]; then
+    if [ "$#" -ne 3 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <FILE> <TARGET_VALUE> <REPLACE_VALUE>"
         return 1
     fi
@@ -736,23 +753,23 @@ HEX_PATCH() {
 
 
 PATCH_FLAG_SECURE() {
-	echo " "
+    echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
-	echo -e "Patching flag secure."
+    echo -e "Patching flag secure."
     #
-	# For android 13
-	# local FILE="${1}/smali_classes3/com/android/server/wm/WindowState.smali"
-	# local METHOD_NAME_1=".method public isSecureLocked()Z"
-	# Only one method.
+    # For android 13
+    # local FILE="${1}/smali_classes3/com/android/server/wm/WindowState.smali"
+    # local METHOD_NAME_1=".method public isSecureLocked()Z"
+    # Only one method.
 
     # https://github.com/ShaDisNX255/NcX_Stock/commit/c2cc85818df4fe040b4f89ca8f9b78e939b211b4
     # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86811691
-	local FILE_1="${1}/smali_classes2/com/android/server/wm/WindowState.smali"
+    local FILE_1="${1}/smali_classes2/com/android/server/wm/WindowState.smali"
     local METHOD_NAME_1=".method public final isSecureLocked()Z"
     local REPLACE_BODY_1='
     .locals 1
@@ -763,7 +780,7 @@ PATCH_FLAG_SECURE() {
     '
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
   
-	local FILE_2="${1}/smali_classes2/com/android/server/wm/WindowManagerService.smali"
+    local FILE_2="${1}/smali_classes2/com/android/server/wm/WindowManagerService.smali"
     local METHOD_NAME_2=".method public final notifyScreenshotListeners(I)Ljava/util/List;"
     local REPLACE_BODY_2='
     .locals 3
@@ -810,17 +827,17 @@ PATCH_FLAG_SECURE() {
 PATCH_SECURE_FOLDER() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Patching secure folder."
 
-	#https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86770885
-	local FILE_1="${1}/smali/com/android/server/knox/dar/DarManagerService.smali"
-	local METHOD_NAME_1=".method public final checkDeviceIntegrity([Ljava/security/cert/Certificate;)Z"
-	local METHOD_NAME_2=".method public final isDeviceRootKeyInstalled()Z"
+    #https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86770885
+    local FILE_1="${1}/smali/com/android/server/knox/dar/DarManagerService.smali"
+    local METHOD_NAME_1=".method public final checkDeviceIntegrity([Ljava/security/cert/Certificate;)Z"
+    local METHOD_NAME_2=".method public final isDeviceRootKeyInstalled()Z"
     local METHOD_NAME_3=".method public final isKnoxKeyInstallable()Z"
     
     local REPLACE_BODY_1='
@@ -833,7 +850,7 @@ PATCH_SECURE_FOLDER() {
 
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
     REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_2" "$REPLACE_BODY_1"
-	REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1"
+    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1"
 
     local FILE_2="${1}/smali/com/android/server/StorageManagerService.smali"
     local METHOD_NAME_4=".method public static isRootedDevice()Z"
@@ -851,14 +868,14 @@ PATCH_SECURE_FOLDER() {
 PATCH_PRIVATE_SHARE() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Patching private share."
-	# https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86805769
-	
+    # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-86805769
+    
     local FILE="${1}/smali/com/samsung/android/security/keystore/AttestParameterSpec.smali"
     # patch .method public isVerifiableIntegrity()Z
     local METHOD_NAME=".method public isVerifiableIntegrity()Z"
@@ -869,20 +886,20 @@ PATCH_PRIVATE_SHARE() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
 }
 
 
 DISABLE_SIGNATURE_VERIFICATION() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
 
     echo -e "Disabling signature verification."
-	# https://github.com/ShaDisNX255/NcX_Stock/commit/e9fca1cedf2405c9f84dc2ee4aafa018e59de464
+    # https://github.com/ShaDisNX255/NcX_Stock/commit/e9fca1cedf2405c9f84dc2ee4aafa018e59de464
     # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-87773529
     # https://forum.xda-developers.com/t/mods-samsung-not-android-mods-collection-exynos.3772017/post-87773543
 
@@ -896,14 +913,14 @@ DISABLE_SIGNATURE_VERIFICATION() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
 }
 
 
 PATCH_KNOX_GUARD() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_SERVICES_DIRECTORY>"
         return 1
     fi
@@ -915,7 +932,7 @@ PATCH_KNOX_GUARD() {
     local REPLACE_BODY_1='
     .locals 0
  
-	invoke-direct {p0}, Lcom/samsung/android/knoxguard/IKnoxGuardManager$Stub;-><init>()V
+    invoke-direct {p0}, Lcom/samsung/android/knoxguard/IKnoxGuardManager$Stub;-><init>()V
  
     const/4 p1, 0x0
  
@@ -931,7 +948,7 @@ PATCH_KNOX_GUARD() {
     throw p0
     '
     REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME_1" "$REPLACE_BODY_1"
-	rm -rf "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app/KnoxGuard"
+    rm -rf "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app/KnoxGuard"
 }
 
 
@@ -943,10 +960,10 @@ UPDATE_SDHMS() {
 
     local EXTRACTED_FIRM_DIR="$1"
 
-	if [ "$USE_ALT_SDHMS_APP" = "TRUE" ]; then
+    if [ "$USE_ALT_SDHMS_APP" = "TRUE" ]; then
         echo "- Adding alternative SDHMS app."
-		rm -rf "${EXTRACTED_FIRM_DIR}/system/priv-app/SamsungDeviceHealthManagerService"
-		cp -a "$(pwd)/QuantumROM/Mods/Apps/SDHMS/." "${EXTRACTED_FIRM_DIR}/system"
+        rm -rf "${EXTRACTED_FIRM_DIR}/system/priv-app/SamsungDeviceHealthManagerService"
+        cp -a "$(pwd)/QuantumROM/Mods/Apps/SDHMS/." "${EXTRACTED_FIRM_DIR}/system"
     fi
 }
 
@@ -993,14 +1010,14 @@ PATCH_SSRM() {
 PATCH_BT_LIB() {
     echo " "
 
-	if [ "$#" -ne 2 ]; then
+    if [ "$#" -ne 2 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIRECTORY> <WORK_DIR>"
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	local WORK_DIR="$2"
-	local BT_LIB_FILE="$WORK_DIR/libbluetooth_jni.so"
+    local EXTRACTED_FIRM_DIR="$1"
+    local WORK_DIR="$2"
+    local BT_LIB_FILE="$WORK_DIR/libbluetooth_jni.so"
 
     echo -e "Patching Bluetooth library."
     # Get libbluetooth_jni.so
@@ -1013,10 +1030,10 @@ PATCH_BT_LIB() {
         "apex_payload.img" \
         -o"$WORK_DIR" -y >/dev/null
 
-	debugfs -R "dump /lib64/libbluetooth_jni.so $WORK_DIR/libbluetooth_jni.so" \
+    debugfs -R "dump /lib64/libbluetooth_jni.so $WORK_DIR/libbluetooth_jni.so" \
         "$WORK_DIR/apex_payload.img" >/dev/null
 
-	rm -rf "$WORK_DIR/apex_payload.img"
+    rm -rf "$WORK_DIR/apex_payload.img"
 
     declare -A hex=(
         [136]=00122a0140395f01086b00020054 [1136]=00122a0140395f01086bde030014
@@ -1093,17 +1110,17 @@ PATCH_BT_LIB() {
 FIX_VNDK() {
     echo " "
 
-	if [ "$#" -ne 1 ]; then
+    if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIRECTORY>"
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	local TARGET_ROM_SYSTEM_EXT_DIR="$(GET_SYSTEM_EXT_DIR "$EXTRACTED_FIRM_DIR")"
+    local EXTRACTED_FIRM_DIR="$1"
+    local TARGET_ROM_SYSTEM_EXT_DIR="$(GET_SYSTEM_EXT_DIR "$EXTRACTED_FIRM_DIR")"
 
     echo -e "Checking $STOCK_DEVICE and $TARGET_DEVICE vndk version."
     export SDK="$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" ro.build.version.sdk_full)"
-	echo "- Target rom SDK version: $SDK"
+    echo "- Target rom SDK version: $SDK"
     if [ -f "${TARGET_ROM_SYSTEM_EXT_DIR}/apex/com.android.vndk.v${STOCK_VNDK_VERSION}.apex" ]; then
         echo -e "- VNDK matched. ${TARGET_ROM_SYSTEM_EXT_DIR}/apex/com.android.vndk.v${STOCK_VNDK_VERSION}.apex"
     else
@@ -1176,17 +1193,17 @@ SEPARATE_SYSTEM_EXT() {
 
     local EXTRACTED_FIRM_DIR="$1"
 
-	echo "- Separating system_ext"
+    echo "- Separating system_ext"
     mv "${EXTRACTED_FIRM_DIR}/system/system/system_ext" "${EXTRACTED_FIRM_DIR}/"
-	ln -s /system_ext ${EXTRACTED_FIRM_DIR}/system/system/system_ext
-	rm -rf "${EXTRACTED_FIRM_DIR}/system/system_ext"
-	mkdir "${EXTRACTED_FIRM_DIR}/system/system_ext"
+    ln -s /system_ext ${EXTRACTED_FIRM_DIR}/system/system/system_ext
+    rm -rf "${EXTRACTED_FIRM_DIR}/system/system_ext"
+    mkdir "${EXTRACTED_FIRM_DIR}/system/system_ext"
 
     SYSTEM_FS_CONFIG="${EXTRACTED_FIRM_DIR}/config/system_fs_config"
-	SYSTEM_FILE_CONTEXTS="${EXTRACTED_FIRM_DIR}/config/system_file_contexts"
+    SYSTEM_FILE_CONTEXTS="${EXTRACTED_FIRM_DIR}/config/system_file_contexts"
     
-	SYSTEM_EXT_FS_CONFIG="${EXTRACTED_FIRM_DIR}/config/system_ext_fs_config"
-	SYSTEM_EXT_FILE_CONTEXTS="${EXTRACTED_FIRM_DIR}/config/system_ext_file_contexts"
+    SYSTEM_EXT_FS_CONFIG="${EXTRACTED_FIRM_DIR}/config/system_ext_fs_config"
+    SYSTEM_EXT_FILE_CONTEXTS="${EXTRACTED_FIRM_DIR}/config/system_ext_file_contexts"
 
     # Process system_ext_file_contexts
     if grep -q '^/system/system/system_ext' "$SYSTEM_FILE_CONTEXTS"; then
@@ -1196,11 +1213,11 @@ SEPARATE_SYSTEM_EXT() {
         mv "$SYSTEM_EXT_FILE_CONTEXTS.tmp" "$SYSTEM_EXT_FILE_CONTEXTS"
 
         # Add object context line if missing
-		grep -qxF '/system/system_ext u:object_r:system_file:s0' "$SYSTEM_FILE_CONTEXTS" || echo '/system/system_ext u:object_r:system_file:s0' >> "$SYSTEM_FILE_CONTEXTS"
-		grep -qxF '/system/system/system_ext u:object_r:system_file:s0' "$SYSTEM_EXT_FILE_CONTEXTS" || echo '/system/system/system_ext u:object_r:system_file:s0' >> "$SYSTEM_EXT_FILE_CONTEXTS"
+        grep -qxF '/system/system_ext u:object_r:system_file:s0' "$SYSTEM_FILE_CONTEXTS" || echo '/system/system_ext u:object_r:system_file:s0' >> "$SYSTEM_FILE_CONTEXTS"
+        grep -qxF '/system/system/system_ext u:object_r:system_file:s0' "$SYSTEM_EXT_FILE_CONTEXTS" || echo '/system/system/system_ext u:object_r:system_file:s0' >> "$SYSTEM_EXT_FILE_CONTEXTS"
 
         grep -qxF '/ u:object_r:system_file:s0' "$SYSTEM_EXT_FILE_CONTEXTS" || echo '/ u:object_r:system_file:s0' >> "$SYSTEM_EXT_FILE_CONTEXTS"
-		sort -u "$SYSTEM_EXT_FILE_CONTEXTS" -o "$SYSTEM_EXT_FILE_CONTEXTS"
+        sort -u "$SYSTEM_EXT_FILE_CONTEXTS" -o "$SYSTEM_EXT_FILE_CONTEXTS"
     fi
 
     # Process system_ext_fs_config
@@ -1208,15 +1225,15 @@ SEPARATE_SYSTEM_EXT() {
         grep '^system/system/system_ext' "$SYSTEM_FS_CONFIG" > "$SYSTEM_EXT_FS_CONFIG"
         sed -i '\|^system/system/system_ext|d' "$SYSTEM_FS_CONFIG"
         awk '{sub(/^system\/system\/system_ext/, "system_ext"); print}' "$SYSTEM_EXT_FS_CONFIG" > "$SYSTEM_EXT_FS_CONFIG.tmp" &&  \
-	    mv "$SYSTEM_EXT_FS_CONFIG.tmp" "$SYSTEM_EXT_FS_CONFIG"
+        mv "$SYSTEM_EXT_FS_CONFIG.tmp" "$SYSTEM_EXT_FS_CONFIG"
 
         # Add default fs permissions if missing
         grep -qxF 'system/system_ext 0 0 0755' "$SYSTEM_FS_CONFIG" || echo 'system/system_ext 0 0 0755' >> "$SYSTEM_FS_CONFIG"
-		grep -qxF 'system/system/system_ext 0 0 0644' "$SYSTEM_FS_CONFIG" || echo 'system/system/system_ext 0 0 0644' >> "$SYSTEM_FS_CONFIG"
+        grep -qxF 'system/system/system_ext 0 0 0644' "$SYSTEM_FS_CONFIG" || echo 'system/system/system_ext 0 0 0644' >> "$SYSTEM_FS_CONFIG"
 
         grep -qxF '/ 0 0 0755' "$SYSTEM_EXT_FS_CONFIG" || echo '/ 0 0 0755' >> "$SYSTEM_EXT_FS_CONFIG"
         grep -qxF 'system_ext/ 0 0 0755' "$SYSTEM_EXT_FS_CONFIG" || echo 'system_ext/ 0 0 0755' >> "$SYSTEM_EXT_FS_CONFIG"
-		sort -u "$SYSTEM_EXT_FS_CONFIG" -o "$SYSTEM_EXT_FS_CONFIG"
+        sort -u "$SYSTEM_EXT_FS_CONFIG" -o "$SYSTEM_EXT_FS_CONFIG"
     fi
 
     export TARGET_ROM_SYSTEM_EXT_DIR="${EXTRACTED_FIRM_DIR}/system_ext"
@@ -1239,12 +1256,12 @@ ADJUST_SYSTEM_EXT() {
 
         elif [ -d "${EXTRACTED_FIRM_DIR}/system/system_ext/etc" ]; then
             export TARGET_ROM_SYSTEM_EXT_DIR="${EXTRACTED_FIRM_DIR}/system/system_ext"
-			
-		elif [ -d "${EXTRACTED_FIRM_DIR}/system_ext/etc" ]; then
-		    ADD_SYSTEM_EXT_IN_SYSTEM_ROOT "$EXTRACTED_FIRM_DIR"
+            
+        elif [ -d "${EXTRACTED_FIRM_DIR}/system_ext/etc" ]; then
+            ADD_SYSTEM_EXT_IN_SYSTEM_ROOT "$EXTRACTED_FIRM_DIR"
         fi
 
-	elif [ "$STOCK_HAS_SEPARATE_SYSTEM_EXT" = "TRUE" ]; then
+    elif [ "$STOCK_HAS_SEPARATE_SYSTEM_EXT" = "TRUE" ]; then
         echo "STOCK_HAS_SEPARATE_SYSTEM_EXT: $STOCK_HAS_SEPARATE_SYSTEM_EXT"
 
         if [ -d "${EXTRACTED_FIRM_DIR}/system/system/system_ext/etc" ]; then
@@ -1286,20 +1303,20 @@ PATCH_SELINUX() {
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	local TARGET_ROM_SYSTEM_EXT_DIR="$(GET_SYSTEM_EXT_DIR "$EXTRACTED_FIRM_DIR")"
+    local EXTRACTED_FIRM_DIR="$1"
+    local TARGET_ROM_SYSTEM_EXT_DIR="$(GET_SYSTEM_EXT_DIR "$EXTRACTED_FIRM_DIR")"
 
     echo -e "Patching selinux."
 
-	UNSUPPORTED_SELINUX=("audiomirroring" "fabriccrypto" "hal_dsms_default" "qb_id_prop" "hal_dsms_service" "proc_compaction_proactiveness" "sbauth" "ker_app" "kpp_app" "kpp_data" "attiqi_app" "kpoc_charger" "sec_diag" "mosey_app" "vendor_smcinvoke_device")
+    UNSUPPORTED_SELINUX=("audiomirroring" "fabriccrypto" "hal_dsms_default" "qb_id_prop" "hal_dsms_service" "proc_compaction_proactiveness" "sbauth" "ker_app" "kpp_app" "kpp_data" "attiqi_app" "kpoc_charger" "sec_diag" "mosey_app" "vendor_smcinvoke_device")
 
     if [ -d "${EXTRACTED_FIRM_DIR}/system" ]; then
-	    echo "- Patching selinux for system"
+        echo "- Patching selinux for system"
 
-	    REMOVE_LINE '(genfscon sysfs "/bus/usb/devices" (u object_r sysfs_usb ((s0) (s0))))' \
-		    "${EXTRACTED_FIRM_DIR}/system/system/etc/selinux/plat_sepolicy.cil" >/dev/null 2>&1
-		REMOVE_LINE '(genfscon proc "/sys/vm/compaction_proactiveness" (u object_r proc_compaction_proactiveness ((s0) (s0))))' \
-		    "${EXTRACTED_FIRM_DIR}/system/system/etc/selinux/plat_sepolicy.cil" >/dev/null 2>&1
+        REMOVE_LINE '(genfscon sysfs "/bus/usb/devices" (u object_r sysfs_usb ((s0) (s0))))' \
+            "${EXTRACTED_FIRM_DIR}/system/system/etc/selinux/plat_sepolicy.cil" >/dev/null 2>&1
+        REMOVE_LINE '(genfscon proc "/sys/vm/compaction_proactiveness" (u object_r proc_compaction_proactiveness ((s0) (s0))))' \
+            "${EXTRACTED_FIRM_DIR}/system/system/etc/selinux/plat_sepolicy.cil" >/dev/null 2>&1
     else
         echo -e "- No system directory found."
     fi
@@ -1318,13 +1335,13 @@ PATCH_SELINUX() {
             done
         done
 
-	    REMOVE_LINE '(genfscon proc "/sys/kernel/firmware_config" (u object_r proc_fmw ((s0) (s0))))' \
-	        "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_sepolicy.cil" >/dev/null 2>&1
-	    REMOVE_LINE '(genfscon proc "/sys/vm/compaction_proactiveness" (u object_r proc_compaction_proactiveness ((s0) (s0))))' \
-	        "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_sepolicy.cil" >/dev/null 2>&1
+        REMOVE_LINE '(genfscon proc "/sys/kernel/firmware_config" (u object_r proc_fmw ((s0) (s0))))' \
+            "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_sepolicy.cil" >/dev/null 2>&1
+        REMOVE_LINE '(genfscon proc "/sys/vm/compaction_proactiveness" (u object_r proc_compaction_proactiveness ((s0) (s0))))' \
+            "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_sepolicy.cil" >/dev/null 2>&1
         REMOVE_LINE 'init.svc.vendor.wvkprov_server_hal                           u:object_r:wvkprov_prop:s0' \
-	        "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_property_contexts" >/dev/null 2>&1
-	else
+            "${TARGET_ROM_SYSTEM_EXT_DIR}/etc/selinux/system_ext_property_contexts" >/dev/null 2>&1
+    else
         echo -e "- No system_ext directory found."
     fi
 }
@@ -1384,9 +1401,9 @@ APPLY_CUSTOM_FLOATING_FEATURE() {
         return 1
     fi
 
-	local FLOATING_FEATURE_FILE_DIRECTORY="$1"
+    local FLOATING_FEATURE_FILE_DIRECTORY="$1"
 
-	echo -e "- Applying Custom Floating Feature."
+    echo -e "- Applying Custom Floating Feature."
     #========== COMMON ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_COMMON_CONFIG_SEP_CATEGORY" "sep_basic"
 
@@ -1394,11 +1411,11 @@ APPLY_CUSTOM_FLOATING_FEATURE() {
     sed -i '/SEC_FLOATING_FEATURE_COMMON_DISABLE_NATIVE_AI/d' "$FLOATING_FEATURE_FILE_DIRECTORY"
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_VISION_SUPPORT_AI_MY_FAVORITE_CONTENTS" "TRUE"
 
-	#============= OCR ==========#
+    #============= OCR ==========#
     sed -i '/SEC_FLOATING_FEATURE_CAMERA_CONFIG_OCR_ENGINE_UNSUPPORT /d' "$FLOATING_FEATURE_FILE_DIRECTORY"
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_CAMERA_CONFIG_STRIDE_OCR_VERSION" "V2"
 
-	#========== EDGE ==========#
+    #========== EDGE ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_COMMON_CONFIG_EDGE" "panel"
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_SYSTEMUI_SUPPORT_BRIEF_NOTIFICATION" "TRUE"
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_SYSTEMUI_CONFIG_EDGELIGHTING_FRAME_EFFECT" "frame_effect"
@@ -1406,7 +1423,7 @@ APPLY_CUSTOM_FLOATING_FEATURE() {
     #========== SCREEN RECORDER ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_SCREEN_RECORDER" "TRUE"
 
-	#========== VOICE RECORDER ==========#
+    #========== VOICE RECORDER ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_VOICERECORDER_CONFIG_DEF_MODE" "normal,interview,voicememo"
 
     #========== AUDIO ==========#
@@ -1428,8 +1445,8 @@ APPLY_CUSTOM_FLOATING_FEATURE() {
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_LAUNCHER_CONFIG_ANIMATION_TYPE" "HighEnd"
 
     #========== AOD ==========#
-	if [ -d "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app"/AODService_* ]; then
-	    UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_AOD_ITEM" "aodversion=7,clocktransition,coverboldfont"
+    if [ -d "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app"/AODService_* ]; then
+        UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_AOD_ITEM" "aodversion=7,clocktransition,coverboldfont"
         UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_LCD_CONFIG_AOD_FULLSCREEN" "1"
     fi
 
@@ -1455,7 +1472,7 @@ APPLY_STOCK_ROM_FLOATING_FEATURE() {
         return 1
     fi
 
-	local FLOATING_FEATURE_FILE_DIRECTORY="$1"
+    local FLOATING_FEATURE_FILE_DIRECTORY="$1"
 
     echo "Applying Stock Floating Feature."
 
@@ -1480,11 +1497,11 @@ APPLY_STOCK_ROM_FLOATING_FEATURE() {
     "SEC_FLOATING_FEATURE_AUDIO_CONFIG_VOLUMEMONITOR_GAIN" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_AUDIO_CONFIG_VOLUMEMONITOR_GAIN" "$STOCK_ROM_FLOATING_FEATURE")"
 
-	UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
+    UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
     "SEC_FLOATING_FEATURE_AUDIO_SUPPORT_DUAL_SPEAKER" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_AUDIO_SUPPORT_DUAL_SPEAKER" "$STOCK_ROM_FLOATING_FEATURE")"
 
-	UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
+    UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
     "SEC_FLOATING_FEATURE_AUDIO_NUMBER_OF_SPEAKER" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_AUDIO_NUMBER_OF_SPEAKER" "$STOCK_ROM_FLOATING_FEATURE")"
 
@@ -1588,20 +1605,20 @@ APPLY_STOCK_ROM_FLOATING_FEATURE() {
     "SEC_FLOATING_FEATURE_LOCKSCREEN_CONFIG_PUNCHHOLE_VI" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_LOCKSCREEN_CONFIG_PUNCHHOLE_VI" "$STOCK_ROM_FLOATING_FEATURE")"
 
-	#========== VIDEO EDITOR ==========#
+    #========== VIDEO EDITOR ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
     "SEC_FLOATING_FEATURE_COMMON_CONFIG_MULTIMEDIA_EDITOR_PLUGIN_PACKAGES" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_COMMON_CONFIG_MULTIMEDIA_EDITOR_PLUGIN_PACKAGES" "$STOCK_ROM_FLOATING_FEATURE")"
 
-	#============= PHOTO REMASTER FIX ==========#
+    #============= PHOTO REMASTER FIX ==========#
     if grep -q "<SEC_FLOATING_FEATURE_SAIV_CONFIG_MIDAS>" "$STOCK_ROM_FLOATING_FEATURE"; then
         UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" "SEC_FLOATING_FEATURE_COMMON_CONFIG_MULTIMEDIA_EDITOR_PLUGIN_PACKAGES" \
         "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_COMMON_CONFIG_MULTIMEDIA_EDITOR_PLUGIN_PACKAGES" "$STOCK_ROM_FLOATING_FEATURE")"
     else
         sed -i '/<SEC_FLOATING_FEATURE_SAIV_CONFIG_MIDAS>/d' "$FLOATING_FEATURE_FILE_DIRECTORY"
     fi
-	
-	#========== SIM RELATED ==========#
+    
+    #========== SIM RELATED ==========#
     UPDATE_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY" \
     "SEC_FLOATING_FEATURE_COMMON_CONFIG_EMBEDDED_SIM_SLOTSWITCH" \
     "$(GET_FF_VALUE "SEC_FLOATING_FEATURE_COMMON_CONFIG_EMBEDDED_SIM_SLOTSWITCH" "$STOCK_ROM_FLOATING_FEATURE")"
@@ -1638,7 +1655,7 @@ REMOVE_CAMERA_FILES() {
             local target="$folder/$file_name"
 
             if [ -f "$target" ]; then
-			     #echo "Deleting: $target"
+                 #echo "Deleting: $target"
                 rm -f "$target"
             fi
         done
@@ -1666,7 +1683,7 @@ FIX_BLUETOOTH() {
 
     local EXTRACTED_FIRM_DIR="$1"
     local BUILD_BRAND=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "Build.BRAND")
-	local SDK=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.build.version.sdk_full")
+    local SDK=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.build.version.sdk_full")
     local ANDROID_VERSION=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.system.build.version.release")
 
     if [ "$STOCK_DEVICE_CHIPSET" = "MediaTek" ] && [ "$BUILD_BRAND" != "MTK" ]; then
@@ -1703,7 +1720,7 @@ FIX_CAMERA() {
 
         if [ -s "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}.zip" ]; then
             rm -rf "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}"
-			REMOVE_CAMERA_FILES "$EXTRACTED_FIRM_DIR"
+            REMOVE_CAMERA_FILES "$EXTRACTED_FIRM_DIR"
 
             unzip -o \
                 "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}.zip" \
@@ -1714,7 +1731,7 @@ FIX_CAMERA() {
                 "$((FIRST_CAM_LINE-1))r $(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}/system/etc/floating_feature.xml" \
                 "${EXTRACTED_FIRM_DIR}/system/system/etc/floating_feature.xml"
 
-			rm -rf "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}/system/etc/floating_feature.xml"
+            rm -rf "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}/system/etc/floating_feature.xml"
 
             echo "- Copying A34 mediatek camera related files."
             cp -rfa "$(pwd)/QuantumROM/Mods/Apps/MTK_Camera_Files_Android_${ANDROID_VERSION}/system/." "${EXTRACTED_FIRM_DIR}/system/system"
@@ -1726,17 +1743,17 @@ FIX_CAMERA() {
 APPLY_STOCK_CONFIG() {
     echo " "
 
-	echo -e "Applying $STOCK_DEVICE device config."
+    echo -e "Applying $STOCK_DEVICE device config."
     if [ "$#" -ne 1 ]; then
         echo -e "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIR>"
         return 1
     fi
 
     local EXTRACTED_FIRM_DIR="$1"
-	local FLOATING_FEATURE_FILE_DIRECTORY="${EXTRACTED_FIRM_DIR}/system/system/etc/floating_feature.xml"
-	export TARGET_ROM_CPU_ABILIST="$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" ro.system.product.cpu.abilist)"
+    local FLOATING_FEATURE_FILE_DIRECTORY="${EXTRACTED_FIRM_DIR}/system/system/etc/floating_feature.xml"
+    export TARGET_ROM_CPU_ABILIST="$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" ro.system.product.cpu.abilist)"
 
-	if [ -z "$STOCK_DEVICE" ] || [ "$STOCK_DEVICE" = "None" ]; then
+    if [ -z "$STOCK_DEVICE" ] || [ "$STOCK_DEVICE" = "None" ]; then
         echo -e "No target device is set. Just modifying ROM without any device config."
         return 1
     fi
@@ -1744,30 +1761,30 @@ APPLY_STOCK_CONFIG() {
     if [ ! -f "${DEVICES_DIR}/$STOCK_DEVICE/config" ]; then
         echo -e "Config file for $STOCK_DEVICE not found in $DEVICES_DIR"
         return 1
-	fi
+    fi
 
     if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system" ]; then
         echo -e "No usable extracted firmware found"
         return 1
-	fi
+    fi
 
     if [ -f "${DEVICES_DIR}/$STOCK_DEVICE/config" ]; then
         echo -e "$STOCK_DEVICE config found."
         export STOCK_VNDK_VERSION="$(grep -m1 '^STOCK_VNDK_VERSION=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
         export STOCK_HAS_SEPARATE_SYSTEM_EXT="$(grep -m1 '^STOCK_HAS_SEPARATE_SYSTEM_EXT=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-    	export STOCK_DVFS_FILENAME="$(grep -m1 '^STOCK_DVFS_FILENAME=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-		export STOCK_DEVICE_CPU_ABILIST="$(grep -m1 '^STOCK_DEVICE_CPU_ABILIST=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-		export STOCK_DEVICE_CHIPSET="$(grep -m1 '^STOCK_DEVICE_CHIPSET=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-		export USE_ALT_SDHMS_APP="$(grep -m1 '^USE_ALT_SDHMS_APP=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-		export STOCK_HAS_ESIM_SUPPORT="$(grep -m1 '^STOCK_HAS_ESIM_SUPPORT=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_DVFS_FILENAME="$(grep -m1 '^STOCK_DVFS_FILENAME=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_DEVICE_CPU_ABILIST="$(grep -m1 '^STOCK_DEVICE_CPU_ABILIST=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_DEVICE_CHIPSET="$(grep -m1 '^STOCK_DEVICE_CHIPSET=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export USE_ALT_SDHMS_APP="$(grep -m1 '^USE_ALT_SDHMS_APP=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_HAS_ESIM_SUPPORT="$(grep -m1 '^STOCK_HAS_ESIM_SUPPORT=' "${DEVICES_DIR}/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
     fi
 
-	echo "Stock device vndk version: $STOCK_VNDK_VERSION"
+    echo "Stock device vndk version: $STOCK_VNDK_VERSION"
     export STOCK_ROM_FLOATING_FEATURE="${DEVICES_DIR}/$STOCK_DEVICE/floating_feature.xml"
-	export STOCK_SIOP_POLICY_FILENAME="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_SYSTEM_CONFIG_SIOP_POLICY_FILENAME" {print $3}' "$STOCK_ROM_FLOATING_FEATURE" | tr -d '\r' | xargs)"
-	export STOCK_DEVICE_TYPE="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_COMMON_CONFIG_DEVICE_MANUFACTURING_TYPE" {print $3}' "$STOCK_ROM_FLOATING_FEATURE")"
+    export STOCK_SIOP_POLICY_FILENAME="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_SYSTEM_CONFIG_SIOP_POLICY_FILENAME" {print $3}' "$STOCK_ROM_FLOATING_FEATURE" | tr -d '\r' | xargs)"
+    export STOCK_DEVICE_TYPE="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_COMMON_CONFIG_DEVICE_MANUFACTURING_TYPE" {print $3}' "$STOCK_ROM_FLOATING_FEATURE")"
 
-	if [ "$STOCK_DEVICE_CPU_ABILIST" != "$TARGET_ROM_CPU_ABILIST" ]; then
+    if [ "$STOCK_DEVICE_CPU_ABILIST" != "$TARGET_ROM_CPU_ABILIST" ]; then
         echo "CPU ABI MISMATCH!"
         echo "STOCK DEVICE CPU ABI: $STOCK_DEVICE_CPU_ABILIST"
         echo "TARGET ROM CPU ABI  : $TARGET_ROM_CPU_ABILIST"
@@ -1779,17 +1796,17 @@ APPLY_STOCK_CONFIG() {
         REMOVE_ESIM_FILES "$EXTRACTED_FIRM_DIR"
     fi
 
-	# ADJUST SYSTEM_EXT PARTITION.
+    # ADJUST SYSTEM_EXT PARTITION.
     ADJUST_SYSTEM_EXT "$EXTRACTED_FIRM_DIR"
 
-	# FIX VNDK.
-	FIX_VNDK "$EXTRACTED_FIRM_DIR"
+    # FIX VNDK.
+    FIX_VNDK "$EXTRACTED_FIRM_DIR"
 
-	# FIX CAMERA IF NEED
-	FIX_CAMERA "$EXTRACTED_FIRM_DIR"
+    # FIX CAMERA IF NEED
+    FIX_CAMERA "$EXTRACTED_FIRM_DIR"
 
     # Apply stock floating feature.
-	APPLY_STOCK_ROM_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY"
+    APPLY_STOCK_ROM_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY"
 
     # Fix unsupported BPF error for kernels lower than 5.10.
     #if [ "$USE_UI_8_TETHERING_APEX" = "True" ]; then
@@ -1797,22 +1814,22 @@ APPLY_STOCK_CONFIG() {
     #fi
 
     if [ "$STOCK_DEVICE_TYPE" = "jdm" ]; then
-	    echo -e "Applying jdm device feature."
-	    APPLY_JDM_SPECIAL "$EXTRACTED_FIRM_DIR"
+        echo -e "Applying jdm device feature."
+        APPLY_JDM_SPECIAL "$EXTRACTED_FIRM_DIR"
     else
-	    rm -rf "${EXTRACTED_FIRM_DIR}/system/system/cameradata/portrait_data"
-	fi
+        rm -rf "${EXTRACTED_FIRM_DIR}/system/system/cameradata/portrait_data"
+    fi
 
-	rm -rf "${EXTRACTED_FIRM_DIR}/system/system/etc/init"/rscmgr*.rc
-	find "${EXTRACTED_FIRM_DIR}/system/system/media" -maxdepth 1 -type f \( -iname "*.spi" -o -iname "*.qmg" -o -iname "*.txt" \) -delete
-	rm -rf "$EXTRACTED_FIRM_DIR"/product/overlay/framework-res*auto_generated_rro_product.apk
-	rm -rf ${EXTRACTED_FIRM_DIR}/product/overlay/SystemUI*auto_generated_rro_product.apk
-	cp -a "${DEVICES_DIR}/$STOCK_DEVICE/Stock/." "${EXTRACTED_FIRM_DIR}/"
+    rm -rf "${EXTRACTED_FIRM_DIR}/system/system/etc/init"/rscmgr*.rc
+    find "${EXTRACTED_FIRM_DIR}/system/system/media" -maxdepth 1 -type f \( -iname "*.spi" -o -iname "*.qmg" -o -iname "*.txt" \) -delete
+    rm -rf "$EXTRACTED_FIRM_DIR"/product/overlay/framework-res*auto_generated_rro_product.apk
+    rm -rf ${EXTRACTED_FIRM_DIR}/product/overlay/SystemUI*auto_generated_rro_product.apk
+    cp -a "${DEVICES_DIR}/$STOCK_DEVICE/Stock/." "${EXTRACTED_FIRM_DIR}/"
     if [ -d "${DEVICES_DIR}/$STOCK_DEVICE/extra" ]; then
         cp -af "${DEVICES_DIR}/$STOCK_DEVICE/extra/." "$(pwd)/OUT"
     fi
 
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.product.system.model" "$STOCK_DEVICE"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.product.system.model" "$STOCK_DEVICE"
 }
 
 
@@ -1902,7 +1919,7 @@ DISABLE_SECURITY() {
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
+    local EXTRACTED_FIRM_DIR="$1"
 
     echo -e "Disabling security related things."
 
@@ -1911,9 +1928,9 @@ DISABLE_SECURITY() {
         BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.frp.pst" ""
     fi
 
-	if [ -f "${EXTRACTED_FIRM_DIR}/vendor/build.prop" ]; then
+    if [ -f "${EXTRACTED_FIRM_DIR}/vendor/build.prop" ]; then
         echo "- Disabling factory reset protection from vendor."
-		BUILD_PROP "$EXTRACTED_FIRM_DIR" "vendor" "ro.frp.pst" ""
+        BUILD_PROP "$EXTRACTED_FIRM_DIR" "vendor" "ro.frp.pst" ""
     fi
 
     if [ -f "${EXTRACTED_FIRM_DIR}/vendor/recovery-from-boot.p" ]; then
@@ -1921,9 +1938,9 @@ DISABLE_SECURITY() {
         rm -rf "${EXTRACTED_FIRM_DIR}/vendor/recovery-from-boot.p"
     fi
 
-	DISABLE_FBE "$EXTRACTED_FIRM_DIR"
-	DISABLE_FDE "$EXTRACTED_FIRM_DIR"
-	REMOVE_TLC_ICC "$EXTRACTED_FIRM_DIR"
+    DISABLE_FBE "$EXTRACTED_FIRM_DIR"
+    DISABLE_FDE "$EXTRACTED_FIRM_DIR"
+    REMOVE_TLC_ICC "$EXTRACTED_FIRM_DIR"
 }
 
 
@@ -1933,8 +1950,8 @@ APPLY_JDM_SPECIAL() {
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	rm -rf "${EXTRACTED_FIRM_DIR}/system/system/priv-app/SamSungCamera"
+    local EXTRACTED_FIRM_DIR="$1"
+    rm -rf "${EXTRACTED_FIRM_DIR}/system/system/priv-app/SamSungCamera"
     cp -rfa "$(pwd)/QuantumROM/Mods/Apps/JDM_Special/SamSungCamera/." "${EXTRACTED_FIRM_DIR}/"
 }
 
@@ -1959,15 +1976,15 @@ ADD_SAMSUNG_FLAGSHIP_APPS() {
 
     export PRODUCT_BRAND=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.product.system.brand")
     export ANDROID_VERSION=$(GET_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.system.build.version.release")
-	
+    
     if [ "$PRODUCT_BRAND" != "samsung" ]; then
         return 1
     fi
 
     # ================= SMART MANAGER =================
     echo "- Adding China smart manager."
-	
-	if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/priv-app/SmartManagerCN" ] && \
+    
+    if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/priv-app/SmartManagerCN" ] && \
         [ ! -f "$(pwd)/QuantumROM/Mods/Apps/Samsung_SmartManagerCN_Android_${ANDROID_VERSION}.zip" ]; then
 
         if curl -fsSL --connect-timeout 5 https://www.google.com >/dev/null; then
@@ -2001,8 +2018,8 @@ ADD_SAMSUNG_FLAGSHIP_APPS() {
 
     # ================= PHOTO EDITOR AI FULL =================
     echo "- Adding Photo editor ai full."
-	
-	if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/priv-app/PhotoEditor_AIFull" ] && \
+    
+    if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/priv-app/PhotoEditor_AIFull" ] && \
         [ ! -f "$(pwd)/QuantumROM/Mods/Apps/Samsung_PhotoEditor_AIFull_Android_${ANDROID_VERSION}.zip" ]; then
 
         if curl -fsSL --connect-timeout 5 https://www.google.com >/dev/null; then
@@ -2047,7 +2064,7 @@ ADD_SAMSUNG_FLAGSHIP_APPS() {
     if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/app/OCRDataProvider" ] && \
         [ ! -f "$(pwd)/QuantumROM/Mods/Apps/Samsung_OCRDataProvider_Android_${ANDROID_VERSION}.zip" ]; then
 
-		if curl -fsSL --connect-timeout 5 https://www.google.com >/dev/null; then
+        if curl -fsSL --connect-timeout 5 https://www.google.com >/dev/null; then
             wget --no-check-certificate \
                 "https://github.com/SN-Abdullah-Al-Noman/Samsung_Special/releases/download/Android_${ANDROID_VERSION}/Samsung_OCRDataProvider_Android_${ANDROID_VERSION}.zip" \
                 -O "$(pwd)/QuantumROM/Mods/Apps/Samsung_OCRDataProvider_Android_${ANDROID_VERSION}.zip"
@@ -2066,13 +2083,13 @@ ADD_SAMSUNG_FLAGSHIP_APPS() {
 
         cp -rfa "$(pwd)/QuantumROM/Mods/Apps/Samsung_OCRDataProvider_Android_${ANDROID_VERSION}/." "${EXTRACTED_FIRM_DIR}/"
 
-		if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/app/OCRDataProvider" ]; then
-	        cp -rfa "$(pwd)/QuantumROM/Mods/Apps/OCR/." "${EXTRACTED_FIRM_DIR}/"
+        if [ ! -d "${EXTRACTED_FIRM_DIR}/system/system/app/OCRDataProvider" ]; then
+            cp -rfa "$(pwd)/QuantumROM/Mods/Apps/OCR/." "${EXTRACTED_FIRM_DIR}/"
         fi
     fi
 
     # ================= IMPORTANT APPS =================
-	echo "- Adding Samsung Important Apps."
+    echo "- Adding Samsung Important Apps."
 
     if [ ! -f "$(pwd)/QuantumROM/Mods/Apps/Samsung_Important_Apps_Android_${ANDROID_VERSION}.zip" ]; then
         if curl -fsSL --connect-timeout 5 https://www.google.com >/dev/null; then
@@ -2106,42 +2123,42 @@ APPLY_CUSTOM_FEATURES() {
         return 1
     fi
 
-	local EXTRACTED_FIRM_DIR="$1"
-	local FLOATING_FEATURE_FILE_DIRECTORY="${EXTRACTED_FIRM_DIR}/system/system/etc/floating_feature.xml"
+    local EXTRACTED_FIRM_DIR="$1"
+    local FLOATING_FEATURE_FILE_DIRECTORY="${EXTRACTED_FIRM_DIR}/system/system/etc/floating_feature.xml"
 
-	if [ ! -d "${EXTRACTED_FIRM_DIR}/system" ]; then
-		echo "No extracted firmware found."
+    if [ ! -d "${EXTRACTED_FIRM_DIR}/system" ]; then
+        echo "No extracted firmware found."
         return 1
     fi
 
     echo -e "Applying usefull features."
 
-	echo -e "- Adding build prop tweak."
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.product.locale" "en-US"
+    echo -e "- Adding build prop tweak."
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.product.locale" "en-US"
     BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "fw.max_users" "5"
     BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "fw.show_multiuserui" "1"
     BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "wifi.interface=" "wlan0"
     BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "wlan.wfd.hdcp" "disabled"
     BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "debug.hwui.renderer" "skiavk"
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.telephony.sim_slots.count" "2"
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.surface_flinger.protected_contents" "true"
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.config.dmverity" "false"
-	#BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.config.iccc_version" "iccc_disabled"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.telephony.sim_slots.count" "2"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.surface_flinger.protected_contents" "true"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.config.dmverity" "false"
+    #BUILD_PROP "$EXTRACTED_FIRM_DIR" "system" "ro.config.iccc_version" "iccc_disabled"
 
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.product.locale" "en-US"
-	BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.config.dmverity" "false"
-	#BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.config.iccc_version" "iccc_disabled"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.product.locale" "en-US"
+    BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.config.dmverity" "false"
+    #BUILD_PROP "$EXTRACTED_FIRM_DIR" "product" "ro.config.iccc_version" "iccc_disabled"
 
     # Apply custom floating feature.
-	APPLY_CUSTOM_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY"
-	
-	# Fix samsung device health manager service
-	#UPDATE_SDHMS "$EXTRACTED_FIRM_DIR"
+    APPLY_CUSTOM_FLOATING_FEATURE "$FLOATING_FEATURE_FILE_DIRECTORY"
+    
+    # Fix samsung device health manager service
+    #UPDATE_SDHMS "$EXTRACTED_FIRM_DIR"
 
-	chown -R "$REAL_USER:$REAL_USER" "$EXTRACTED_FIRM_DIR"
+    chown -R "$REAL_USER:$REAL_USER" "$EXTRACTED_FIRM_DIR"
     chmod -R u+rwX "$EXTRACTED_FIRM_DIR"
-	
-	if [ -d "$(pwd)/QuantumROM/usefull_things" ]; then
+    
+    if [ -d "$(pwd)/QuantumROM/usefull_things" ]; then
         cp -a "$(pwd)/QuantumROM/usefull_things/." "$(pwd)/OUT"
     fi
 }
@@ -2163,7 +2180,7 @@ DECODE_OMC() {
     fi
 
     local FW_DIR="$1"
-	local OUT_DIR="$2"
+    local OUT_DIR="$2"
 
     if [ -d "${FW_DIR}/odm/etc/omc" ]; then
         rm -rf "${OUT_DIR}/odm_decoded"
@@ -2176,8 +2193,8 @@ DECODE_OMC() {
             >/dev/null 2>&1 || {
                 echo -e "Failed decoding odm/etc/omc."
             }
-	else
-	     echo "No odm found."
+    else
+        echo "No odm found."
     fi
 
     if [ -d "${FW_DIR}/optics" ]; then
@@ -2191,8 +2208,8 @@ DECODE_OMC() {
             >/dev/null 2>&1 || {
                 echo -e "Failed decoding optics."
             }
-	else
-	     echo "No optics found."
+    else
+        echo "No optics found."
     fi
 }
 
@@ -2548,11 +2565,11 @@ BUILD_SUPER_IMG() {
     TOTAL_SIZE=$((TOTAL_SIZE + 4194304))
 
     $lpmake \
-	    --device super:$TOTAL_SIZE \
+        --device super:$TOTAL_SIZE \
         --metadata-size 65536 \
         --metadata-slots 2 \
-		--group main:$TOTAL_SIZE \
-		--block-size 4096 \
+        --group main:$TOTAL_SIZE \
+        --block-size 4096 \
         $PARTITIONS \
         $IMAGES \
         --output "$OUTPUT_IMG"
