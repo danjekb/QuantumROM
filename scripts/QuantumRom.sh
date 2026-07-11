@@ -166,7 +166,7 @@ DOWNLOAD_FIRMWARE() {
     local FW_VERSION="${5:-}"
 
     # Link do pobrania firmware z Google Drive
-    local GDRIVE_URL="https://drive.usercontent.google.com/download?id=1cAbC6Xyyrf4Cnkoue04xcpREyZ9szHmo&export=download&authuser=0"
+    local GDRIVE_URL="https://drive.google.com/file/d/1cAbC6Xyyrf4Cnkoue04xcpREyZ9szHmo/view?usp=sharing"
 
     rm -rf "$DOWN_DIR"
     mkdir -p "$DOWN_DIR"
