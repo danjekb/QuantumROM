@@ -12,6 +12,11 @@ RELEASE_NAME="${TARGET_DEVICE} Port For ${STOCK_DEVICE}"
 echo "Uploading to GoFile..."
 GOFILE_LINK=$(sudo bash upload.sh "$ZIP_PATH")
 
+echo "======================================"
+echo "✅ GoFile upload complete!"
+echo "🔗 Link: $GOFILE_LINK"
+echo "======================================"
+
 # File info
 FILE_SIZE=$(du -h "$ZIP_PATH" | cut -f1)
 MD5_SUM=$(md5sum "$ZIP_PATH" | awk '{print $1}')
@@ -41,7 +46,7 @@ JSON_BODY=$(printf '%s' "$RELEASE_BODY" | python3 -c 'import json,sys; print(jso
 if [ -n "$GIT_TOKEN" ]; then
   echo "Creating GitHub release..."
 
-  curl -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" \
+  HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" \
     -H "Authorization: token $GIT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{
@@ -50,7 +55,28 @@ if [ -n "$GIT_TOKEN" ]; then
       \"body\": $JSON_BODY,
       \"draft\": false,
       \"prerelease\": false
-    }"
+    }")
+
+  HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
+  RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+  if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+    RELEASE_URL=$(echo "$RESPONSE_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("html_url",""))' 2>/dev/null)
+    echo "✅ GitHub release created successfully!"
+    echo "🔗 Release: $RELEASE_URL"
+  else
+    echo "⛔️ Failed to create GitHub release (HTTP $HTTP_CODE)."
+    if [ "$HTTP_CODE" -eq 401 ]; then
+      echo "↳ Bad credentials: GIT_TOKEN is invalid, expired, or lacks 'repo' scope."
+      echo "↳ Update the GIT_TOKEN secret in repo Settings → Secrets and variables → Actions."
+    fi
+    echo "$RESPONSE_BODY"
+    echo " "
+    echo "⚠️ Note: the GoFile upload above still succeeded — use that link even though the release failed:"
+    echo "🔗 $GOFILE_LINK"
+  fi
 else
   echo "GIT_TOKEN not found. Skipping release."
+  echo "⚠️ Use the GoFile link above to get the build:"
+  echo "🔗 $GOFILE_LINK"
 fi
