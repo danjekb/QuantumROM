@@ -6,31 +6,35 @@ on:
       STOCK_DEVICE:
         description: "STOCK_DEVICE_MODEL or None"
         required: true
-        default: "SM-A225F"
+        default: "SM-A528B"
       TARGET_DEVICE:
         description: "TARGET_DEVICE_MODEL."
         required: true
-        default: "SM-A346E"
+        default: "SM-G990B"
       TARGET_DEVICE_CSC:
         description: "TARGET_DEVICE_CSC."
         required: true
-        default: "BKD"
+        default: "EUX"
       TARGET_DEVICE_IMEI:
         description: "TARGET_DEVICE_IMEI."
         required: true
-        default: "353435774197736"
+        default: "353718681234563"
+      TARGET_DEVICE_VERSION:
+        description: "TARGET_DEVICE Firmware version (e.g. A346EXXU2AWL1/A346EOXM2AWL1/A346EXXU2AWL1) or 'latest'"
+        required: true
+        default: "G990BXXSCGYC9/G990BOXMCGYC9/G990BXXSCGYC9/G990BXXSCGYC9"
       OUTPUT_FILESYSTEM:
         description: "OUTPUT_FILESYSTEM. e.g erofs / ext4"
         required: true
-        default: "erofs"
+        default: "ext4"
       COMPRESS_IMG_TO_XZ:
         description: "Compress IMG to XZ (True/False)"
         required: true
-        default: "True"
+        default: "False"
 
 jobs:
   build:
-    name: Run QuantumROM Tools OS-15.
+    name: Run QuantumROM Tools OS-14.
     runs-on: ubuntu-latest
 
     steps:
@@ -46,11 +50,6 @@ jobs:
           pip3 install git+https://github.com/martinetd/samloader.git >/dev/null 2>&1
           bash scripts/setup_directories.sh FIRMWARE WORK OUT
 
-      - name: Download firmware ▶️ ${{ github.event.inputs.TARGET_DEVICE }} - ${{ github.event.inputs.TARGET_DEVICE_CSC }}
-        run: |
-          source scripts/QuantumRom.sh
-          DOWNLOAD_FIRMWARE "${{ github.event.inputs.TARGET_DEVICE }}" "${{ github.event.inputs.TARGET_DEVICE_CSC }}" "${{ github.event.inputs.TARGET_DEVICE_IMEI }}" "FIRMWARE"
-
       - name: Start Rom Build For ${{ github.event.inputs.STOCK_DEVICE }}
         run: |
           sudo bash fourteen.sh \
@@ -58,7 +57,8 @@ jobs:
             "${{ github.event.inputs.TARGET_DEVICE }}" \
             "${{ github.event.inputs.TARGET_DEVICE_CSC }}" \
             "${{ github.event.inputs.TARGET_DEVICE_IMEI }}" \
-            "${{ github.event.inputs.OUTPUT_FILESYSTEM }}"
+            "${{ github.event.inputs.OUTPUT_FILESYSTEM }}" \
+            "${{ github.event.inputs.TARGET_DEVICE_VERSION }}"
 
       - name: Compress *.img & make zip file before upload.
         run: |
