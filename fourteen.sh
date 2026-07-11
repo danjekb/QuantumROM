@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ "$#" -lt 5 ]; then
-    echo "Usage: $0 <STOCK_DEVICE> <TARGET_DEVICE> <TARGET_DEVICE_CSC> <TARGET_DEVICE_IMEI> <OUTPUT_FILESYSTEM>"
+    echo "Usage: $0 <STOCK_DEVICE> <TARGET_DEVICE> <TARGET_DEVICE_CSC> <TARGET_DEVICE_IMEI> <OUTPUT_FILESYSTEM> [TARGET_DEVICE_FW_VERSION]"
     exit 1
 fi
 
@@ -13,6 +13,7 @@ export TARGET_DEVICE="$2"
 export TARGET_DEVICE_CSC="$3"
 export TARGET_DEVICE_IMEI="$4"
 export OUTPUT_FILESYSTEM="$5"
+export TARGET_DEVICE_FW_VERSION="${6:-latest}"
 
 # Directories
 export FIRM_DIR="$(pwd)/FW"
@@ -58,6 +59,8 @@ fi
 # Source
 source "$(pwd)/scripts/debloat.sh"
 source "$(pwd)/scripts/QuantumRom.sh"
+
+DOWNLOAD_FIRMWARE "$TARGET_DEVICE" "$TARGET_DEVICE_CSC" "$TARGET_DEVICE_IMEI" "$FIRM_DIR" "$TARGET_DEVICE_FW_VERSION"
 
 EXTRACT_FIRMWARE "$FIRM_DIR/$TARGET_DEVICE"
 EXTRACT_SUPER_IMG "$FIRM_DIR/$TARGET_DEVICE"
