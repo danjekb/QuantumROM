@@ -163,6 +163,7 @@ DOWNLOAD_FIRMWARE() {
     local CSC="$2"
     local IMEI="$3"
     local DOWN_DIR="${4}/$MODEL"
+    local FW_VERSION="${5:-}"
 
     rm -rf "$DOWN_DIR"
     mkdir -p "$DOWN_DIR"
@@ -172,22 +173,33 @@ DOWNLOAD_FIRMWARE() {
     echo -e "======================================"
     echo -e "MODEL: $MODEL | CSC: $CSC"
 
-    VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
+    if [ -n "$FW_VERSION" ] && [ "$FW_VERSION" != "latest" ]; then
+        echo -e "Requested specific firmware version: $FW_VERSION"
+        VERSION="$FW_VERSION"
+    else
+        VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
 
-    if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
-        echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
-        echo -e "Error: $VERSION"
-        return 1
+        if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
+            echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
+            echo -e "Error: $VERSION"
+            return 1
+        fi
     fi
+
+    echo -e "VERSION: $VERSION"
 
     if [ -n "$GITHUB_ENV" ]; then
         echo "VERSION=$VERSION" >> "$GITHUB_ENV"
     fi
 
     # --- Step 2: Download Firmware ---
-    python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
+    if [ -n "$FW_VERSION" ] && [ "$FW_VERSION" != "latest" ]; then
+        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -v "$VERSION" -O "$DOWN_DIR"
+    else
+        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
+    fi
     if [ $? -ne 0 ]; then
-        echo -e "⛔️ Download failed. Check IMEI/MODEL/CSC."
+        echo -e "⛔️ Download failed. Check IMEI/MODEL/CSC/VERSION."
         exit 1
     fi
 
