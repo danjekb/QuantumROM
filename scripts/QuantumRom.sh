@@ -165,48 +165,49 @@ DOWNLOAD_FIRMWARE() {
     local DOWN_DIR="${4}/$MODEL"
     local FW_VERSION="${5:-}"
 
+    # Link do pobrania firmware z Google Drive
+    local GDRIVE_URL="https://drive.usercontent.google.com/download?id=1cAbC6Xyyrf4Cnkoue04xcpREyZ9szHmo&export=download&authuser=0"
+
     rm -rf "$DOWN_DIR"
     mkdir -p "$DOWN_DIR"
 
     echo -e "======================================"
-    echo -e "  Samsung FW Downloader   "
+    echo -e "  Google Drive FW Downloader   "
     echo -e "======================================"
     echo -e "MODEL: $MODEL | CSC: $CSC"
+    echo -e "URL: $GDRIVE_URL"
 
-    if [ -n "$FW_VERSION" ] && [ "$FW_VERSION" != "latest" ]; then
-        echo -e "Requested specific firmware version: $FW_VERSION"
-        VERSION="$FW_VERSION"
-    else
-        VERSION=$(python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" checkupdate 2>&1)
-
-        if [ $? -ne 0 ] || [ -z "$VERSION" ]; then
-            echo -e "⛔️ MODEL/CSC/IMEI not valid or no update found."
-            echo -e "Error: $VERSION"
-            return 1
-        fi
+    if ! command -v gdown &>/dev/null; then
+        echo -e "gdown not found, installing..."
+        pip3 install --break-system-packages -q gdown
     fi
 
+    # Wyciągnij ID pliku z linku Google Drive
+    local FILE_ID
+    FILE_ID=$(echo "$GDRIVE_URL" | grep -oP '(?<=id=)[^&]+')
+
+    if [ -z "$FILE_ID" ]; then
+        echo -e "⛔️ Nie udało się wyodrębnić ID pliku z linku Google Drive."
+        exit 1
+    fi
+
+    echo -e "FILE_ID: $FILE_ID"
+
+    gdown --id "$FILE_ID" -O "$DOWN_DIR/firmware.zip" --fuzzy
+    if [ $? -ne 0 ] || [ ! -s "$DOWN_DIR/firmware.zip" ]; then
+        echo -e "⛔️ Pobieranie firmware z Google Drive nie powiodło się."
+        exit 1
+    fi
+
+    VERSION="${FW_VERSION:-latest}"
     echo -e "VERSION: $VERSION"
 
     if [ -n "$GITHUB_ENV" ]; then
         echo "VERSION=$VERSION" >> "$GITHUB_ENV"
     fi
 
-    # --- Step 2: Download Firmware ---
-    if [ -n "$FW_VERSION" ] && [ "$FW_VERSION" != "latest" ]; then
-        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -v "$VERSION" -O "$DOWN_DIR"
-    else
-        python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
-    fi
-    if [ $? -ne 0 ]; then
-        echo -e "⛔️ Download failed. Check IMEI/MODEL/CSC/VERSION."
-        exit 1
-    fi
-
-	find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
-
     # --- Show Firmware Info ---
-    local file_size=$(du -m "${DOWN_DIR}"/${MODEL}_*_fac.zip 2>/dev/null | cut -f1)
+    local file_size=$(du -m "$DOWN_DIR/firmware.zip" 2>/dev/null | cut -f1)
     echo -e "Firmware Size: ${file_size} MB"
 }
 
