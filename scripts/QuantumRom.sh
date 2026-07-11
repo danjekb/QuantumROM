@@ -182,18 +182,16 @@ DOWNLOAD_FIRMWARE() {
         pip3 install --break-system-packages -q gdown
     fi
 
-    # Wyciągnij ID pliku z linku Google Drive
-    local FILE_ID
-    FILE_ID=$(echo "$GDRIVE_URL" | grep -oP '(?<=id=)[^&]+')
+    echo -e "Downloading via gdown..."
 
-    if [ -z "$FILE_ID" ]; then
-        echo -e "⛔️ Nie udało się wyodrębnić ID pliku z linku Google Drive."
-        exit 1
+    gdown "$GDRIVE_URL" -O "$DOWN_DIR/firmware.zip"
+
+    if [ $? -ne 0 ] || [ ! -s "$DOWN_DIR/firmware.zip" ]; then
+        echo -e "Full URL failed, retrying with file ID only..."
+        local FILE_ID
+        FILE_ID=$(echo "$GDRIVE_URL" | grep -oP '(?<=id=)[^&]+')
+        gdown "$FILE_ID" -O "$DOWN_DIR/firmware.zip"
     fi
-
-    echo -e "FILE_ID: $FILE_ID"
-
-    gdown --id "$FILE_ID" -O "$DOWN_DIR/firmware.zip" --fuzzy
     if [ $? -ne 0 ] || [ ! -s "$DOWN_DIR/firmware.zip" ]; then
         echo -e "⛔️ Pobieranie firmware z Google Drive nie powiodło się."
         exit 1
